@@ -1,4 +1,4 @@
-# Product: A map GPS web-based application. 
+# Product: Navi-Gator, a map GPS web-based application. 
 Software Engineering class project. 
 
 General Product Idea:
