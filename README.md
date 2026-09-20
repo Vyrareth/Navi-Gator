@@ -9,6 +9,7 @@ __How does it works?__ It works by determining the user's location, generating c
 _Built by 5 highly motivated CS Students._
 
 # Project Architecture 
+```
 navi-gator/
 ├── backend/            # Python, orchestration, ML, and routing
 │   ├── requirements.txt
@@ -26,7 +27,8 @@ navi-gator/
 ├── .env.example        
 ├── .gitignore
 └── README.md
-
+```
+```
 EXTERNAL DATA SOURCES
    ┌────────────┐  ┌────────────┐  ┌────────────┐  ┌────────────┐
    │ User loc.  │  │   NJGIN    │  │   MapBox   │  │ FHWA HPMS  │
@@ -69,7 +71,7 @@ EXTERNAL DATA SOURCES
                         │                  │    route map, color-coded
                         │  Folium/Leaflet  │    road conditions, directions
                         └──────────────────┘
-
+```
 
 
 ## Roles: 
