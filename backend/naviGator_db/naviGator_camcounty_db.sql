@@ -51,3 +51,5 @@ CREATE TABLE segment (
     PRIMARY KEY (segmentID),
     FOREIGN KEY (roadID) REFERENCES road(roadID)
 );
+-- further note: I will be adding the additional download files later for use and then additional entry sql work to populate the tables.  
+-- once that is done then we can move onto the CNN beyond initial design. 
