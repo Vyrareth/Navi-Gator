@@ -33,10 +33,10 @@ cursor.execute('''
             sectorID INT NOT NULL,
         countyID INT NOT NULL,
         sector_name VARCHAR(50),
-        sector_uleft_lat DECIMAL NOT NULL, -- never, ever leave these null at all.  
-        sector_uleft_lon DECIMAL NOT NULL,
-        sector_lright_lat DECIMAL NOT NULL, 
-        sector_lright_lon DECIMAL NOT NULL, 
+        sector_uleft_lat DECIMAL, -- may make these of NOT NULL type in the future but may not depending on need cases.  
+        sector_uleft_lon DECIMAL,
+        sector_lright_lat DECIMAL, 
+        sector_lright_lon DECIMAL, 
         PRIMARY KEY (sectorID),
         FOREIGN KEY (countyID) REFERENCES county(countyID)
     );
@@ -75,13 +75,19 @@ cursor.execute('''
 #cursor.execute("INSERT INTO state (stateID,state_name) VALUES (?,?)", (3,"New Jersey"))
 #cursor.execute("INSERT INTO state (stateID,state_name) VALUES (?,?)", (2,"Pennsylvania"))
 
+###NOTE: For County entry, please refer to the FIPS Codes (First two digits indicate state, last three indicate county: NJ is 34 for State and Camden County is 007, in this case just 7)
+#cursor.execute("INSERT INTO county (countyID,stateID,county_name) VALUES (?,?,?)", (7,3,"Camden County"))
+
 #conn.commit()
-cursor.execute("SELECT * FROM state")
+
+###
+cursor.execute("SELECT * FROM county")
 rows=cursor.fetchall()
 
-print("StateID","\t","State Name\n")
+print("countyID","\t","stateID","\t","County Name\n")
 for row in rows:
-    print(row[0],"\t\t",row[1])
+    #print(row[0],"\t\t",row[1])
+    print(row[0],"\t\t",row[1],"\t\t",row[2])
 
 conn.close()
 
