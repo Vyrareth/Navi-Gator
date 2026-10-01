@@ -19,7 +19,7 @@ cursor.execute('''
 ### county table exists only for the sake of expansion; disregard and route only to Camden County for now
 cursor.execute('''
     CREATE TABLE IF NOT EXISTS county (
-	countyID INT NOT NULL,
+		countyID INT NOT NULL,
         stateID INT NOT NULL,
         county_name VARCHAR(50),
         PRIMARY KEY (countyID),
@@ -30,13 +30,14 @@ cursor.execute('''
 ###Note, each sector is supposed to act basically like a square from the NJ satellite; data is to be recorded and stored per each
 cursor.execute('''
     CREATE TABLE IF NOT EXISTS sector (
-            sectorID INT NOT NULL,
+        sectorID INT NOT NULL,
         countyID INT NOT NULL,
         sector_name VARCHAR(50),
         sector_uleft_lat DECIMAL, -- may make these of NOT NULL type in the future but may not depending on need cases.  
         sector_uleft_lon DECIMAL,
         sector_lright_lat DECIMAL, 
         sector_lright_lon DECIMAL, 
+		sector_file_loc VARCHAR(100) NOT NULL,
         PRIMARY KEY (sectorID),
         FOREIGN KEY (countyID) REFERENCES county(countyID)
     );
@@ -46,7 +47,7 @@ cursor.execute('''
 ###residential, Collector, Artery, & Freeway, which may help with future routing needs.  
 cursor.execute('''
     CREATE TABLE IF NOT EXISTS road (
-            roadID INT NOT NULL,
+        roadID INT NOT NULL,
         sectorID INT NOT NULL,
         road_name VARCHAR(50),
         road_type VARCHAR(50),
@@ -58,10 +59,10 @@ cursor.execute('''
 ###Segment is specifically for locating photo files for CNN analysis
 cursor.execute('''
     CREATE TABLE IF NOT EXISTS segment (
-	segmentID INT NOT NULL, 
+		segmentID INT NOT NULL, 
         roadID INT NOT NULL, 
         length_miles DECIMAL,
-        photo_file_loc varchar(100) NOT NULL,
+        photo_file_loc VARCHAR(100) NOT NULL,
         PRIMARY KEY (segmentID),
         FOREIGN KEY (roadID) REFERENCES road(roadID)
     );
