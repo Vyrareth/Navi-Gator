@@ -80,7 +80,7 @@ def extractCentralPixels(edgeDetected):
     return centralPixelData
 
 ###The next step in the process, segmentation
-def segmentationProcess(centralPixelData,minRoadWidth=6):
+def segmentationProcess(centralPixelData,minRoadWidth=7):
     widthFiltered=[p for p in centralPixelData if p['radius']>=minRoadWidth]
     if len(widthFiltered)==0:
         print("no viable candidates found with current constraint")
@@ -188,7 +188,7 @@ def optimizeAndFilterSegments(verifiedSegments, minLength=60,maxMergeGap=15):
 def stage1Pipeline(imageName):
     edgesIdentified=process_road_algorithm_Canny(imageName)
     centralPixelData=extractCentralPixels(edgesIdentified)
-    validCands=segmentationProcess(centralPixelData,minRoadWidth=6)
+    validCands=segmentationProcess(centralPixelData)
     finalRoadSegments=collinearityCheck(validCands,edgesIdentified.shape)
     optRoadSegs=optimizeAndFilterSegments(finalRoadSegments)
     return optRoadSegs
