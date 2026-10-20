@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    <title>Navi-Gator</title>
+    <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    />
+    
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+    <style>
+    #map {
+    height: 450px;
+    width: 100%;
+    margin-top: 20px;
+    border: 2px solid #333;
+    border-radius: 8px;
+    }
+    </style>
+</head>
+<body>
+
+    <h1>Welcome to Navi-Gator!</h1>
+    
+    <h2>Plan Your Trip</h2>
+    <!-- Starting Location -->
+     <label for="start">Starting Location:</label>
+     <select id="start" name="start">
+        {% for location in locations %}
+        <option value="{{ location.id }}">
+            {{ location.name }}
+        </option>
+        {% endfor %}
+    </select>
+    <br><br>
+    
+    <!-- Destination -->
+     <label for="end">Destination:</label>
+     <select id="end" name="end">
+        {% for location in locations %}
+        <option value="{{ location.id }}" {% if loop.index == 2 %}selected{% endif %}>
+            {{ location.name }}
+        </option>
+        {% endfor %}
+    </select>
+    <br><br>
+    
+    <!-- Plan Trip Button -->
+     <button type="button" id="planRoute">
+        Plan Trip
+    </button>
+    
+    <!-- Route Result -->
+     <p id="routeResult" aria-live="polite"></p>
+     <br>
+
+     <div id="map"></div>
+     
+     <h2>Available Locations</h2>
+     <ul>
+        {% for location in locations %}
+        <li>
+            {{ location.name }}
+            ({{ location.latitude }}, {{ location.longitude }})
+        </li>
+        {% endfor %}
+    </ul>
+    
+    <!-- JavaScript -->
+     <script>
+        const locationCoordinates = {};
+        {% for location in locations %}
+        locationCoordinates["{{ location['id'] }}"] = [
+            {{ location['latitude'] }},
+            {{ location['longitude'] }}
+        ];
+        {% endfor %}
+
+     const map = L.map('map').setView([39.9526, -75.1652], 11);
+
+     // Add the map tiles
+     L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap contributors'
+     }).addTo(map);
+
+     let routeLayer = null;
+
+     document.getElementById("planRoute").addEventListener("click", async function() {
+        const start = document.getElementById("start");
+        const end = document.getElementById("end");
+        const startName = start.options[start.selectedIndex].text.trim();
+        const endName = end.options[end.selectedIndex].text.trim();
+        const result = document.getElementById("routeResult");
+
+        if (routeLayer) {
+            map.removeLayer(routeLayer);
+            routeLayer = null;
+        }
+
+        if (start.value === end.value) {
+            result.textContent = "Please select two different locations.";
+            return;
+        }
+
+        const startCoords = locationCoordinates[start.value];
+        const endCoords = locationCoordinates[end.value];
+        if (!startCoords || !endCoords) {
+            result.textContent = "The selected location coordinates are unavailable.";
+            return;
+        }
+
+        const button = document.getElementById("planRoute");
+        button.disabled = true;
+        result.textContent = "Finding a driving route from " + startName + " to " + endName + "...";
+
+        try {
+            const coordinates = `${startCoords[1]},${startCoords[0]};${endCoords[1]},${endCoords[0]}`;
+            const response = await fetch(
+                `https://router.project-osrm.org/route/v1/driving/${coordinates}?overview=full&geometries=geojson`
+            );
+            if (!response.ok) {
+                throw new Error(`Routing service returned HTTP ${response.status}.`);
+            }
+
+            const data = await response.json();
+            if (data.code !== "Ok" || !data.routes || data.routes.length === 0) {
+                result.textContent = "No driving route could be found between these locations.";
+                return;
+            }
+
+            const route = data.routes[0];
+            routeLayer = L.geoJSON(route.geometry, {
+                style: { color: "#1769aa", weight: 6, opacity: 0.8 }
+            }).addTo(map);
+            map.fitBounds(routeLayer.getBounds(), { padding: [50, 50] });
+
+            const distance = (route.distance / 1000).toFixed(1);
+            const duration = Math.round(route.duration / 60);
+            result.textContent = `Driving route from ${startName} to ${endName}: ${distance} km, about ${duration} minutes.`;
+        } catch (error) {
+            result.textContent = "Could not get a route. Check your internet connection and try again.";
+            console.error("Route lookup failed:", error);
+        } finally {
+            button.disabled = false;
+        }
+    });
+
+    // Create markers using locations from SQLite
+    {% for location in locations %}
+    L.marker([
+        {{ location.latitude }},
+        {{ location.longitude }}
+    ])
+    .addTo(map)
+    .bindPopup({{ location['name'] | tojson }});
+    {% endfor %}
+    
+    </script>
+</body>
+</html>
