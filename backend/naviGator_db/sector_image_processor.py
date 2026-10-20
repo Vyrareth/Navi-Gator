@@ -1,147 +1,213 @@
-### Don Frenzel - Image Processing via scikit image ###
-### Identifies features such as roads in the image
+###|====================================================|###
+###|SATELLITE IMAGE ROAD COORDINATE FINDER 1.0          |###
+###|====================================================|###
 
-import os
-import math
+### PROGRAM WRITTEN BY DON FRENZEL
+
+### Vers History:
+### 1.0 - 20.10.2026
+
+### Desc:  This program takes the input of a sector image .tiff file and outputs a pandas df possessing all data necessary to mesh with screenshot program to display viable candidates
+###        for extraction.  UL, LR positions (i.e northwestmost and southeastmost).  
+
+###Imports
+import rasterio
+import cv2
 import numpy as np
-import skimage as ski
-from skimage import io, exposure, filters, morphology, color, restoration
-from skimage.morphology import disk,binary_closing
-import matplotlib.pyplot as plt
+import pandas as pd
+import geopandas as gpd
+from rasterio.features import rasterize
+import rasterio.transform
+import osmnx as ox
+from pyproj import Transformer
+from shapely.ops import linemerge
 
+###Force OSMnx to use a backup public mirror instead of the overloaded German server
+###The community server 'overpass.private.coffee' or public 'overpass.openstreetmap.fr' are excellent alternatives
+ox.settings.overpass_url = "https://overpass.private.coffee/api"
 
-###Import the image_name & convert to matrix datatype
-### Note: comes prenormalized, 0=Black, 1=white; range in pixels in-between
-###       5000x5000, so fairly large to process.  Processing time can be negligble, though.  
+###Disable rate limit
+ox.settings.overpass_rate_limit = False
 
-###Process image processing:
-imageName="sampleimage_closetohome.tif"
+ox.settings.max_query_area_size = 5000000000  ###Prevent req-splitting issues
+ROAD_LINE_THICKNESS_PIXELS = 5 
+###=======================================================================
 
-###Create a function to do this for the sake of organization.  Input is image, output is image.  
-def basicRoadProcessing(imageName):
-    bwimg=io.imread(imageName,as_gray=True)
-    claheImg=exposure.equalize_adapthist(bwimg,clip_limit=0.03) #clahe 
-    #invert the image, then smooth with gaussian
-    invertedImg=1.0-claheImg 
-    smoothed = filters.gaussian(invertedImg, sigma=12)
+###Function to compile a dataframe of roads present in the sector image (set output image false by default
+def roadsFromSector(tiffImagePath,outputFile=False):    
+    ### Grab the height, width, and geotransform matrix without loading the image itself
+    with rasterio.open(tiffImagePath) as dataset:
+        westNative,southNative,eastNative,northNative=dataset.bounds
+        height=dataset.height
+        width=dataset.width
+        transform=dataset.transform
 
-    #black_tophat to isolate the dark linear features (roads)
-    footprint = morphology.footprint_rectangle((17,17)) #rough pixel width of roads
-    blackTophat = morphology.black_tophat(smoothed, footprint)
+    ### Coordinate Transformation Setup (NJ State Plane Feet to WGS84 Lat/Lng)
+    njCRS="EPSG:3424" #def NJ WGS84.
+    transformer=Transformer.from_crs(njCRS,"EPSG:4326",always_xy=True)
 
-    # Subtracting the blackhat response deepens the contrast of the roads
-    highlightedRoads = invertedImg - blackTophat
-    highlightedRoads = np.clip(highlightedRoads, 0.0, 1.0)
+    minLon,minLat=transformer.transform(westNative,southNative)
+    maxLon,maxLat = transformer.transform(eastNative,northNative)
 
-    #increase blackpoint to better 
-    blackpoint=np.percentile(highlightedRoads,50) #def percentile for below to turn to black.  
-    contrastImg=exposure.rescale_intensity(highlightedRoads,in_range=(blackpoint,1.0),out_range=(0.0,1.0)) #rescales the intensity to turn it black.
+    #### Spatial alignment for OSMnx 2.0+ format: (left, bottom, right, top)
+    west=minLon
+    east=maxLon
+    south=minLat
+    north=maxLat
 
-    return contrastImg
+    ### def bounding box to fetch the applicable road vectors.  
+    bbox=(west, south, east, north)
 
-##What I need to do is find the threshold for similarity; print subset of image.
-##Note, values closer to zero will be black; closer to 1 will be white
+    ### grab features from the bounding box coordinates in OSM
+    roadsGeoDF=ox.features_from_bbox(bbox=bbox, tags={"highway": True})
 
-##identify long-run pixels of pure black, map it, shoot coordinates for that unique road identifier to a dataframe, and also its general bounds (i.e. how many pixels away from it can
-## you go without running into noise), which should result in the upper and lower edges for every column of pixels contained, which are also convenient for centering screenshots.
+    ### reconv vectors
+    roadsGeoDF=roadsGeoDF.to_crs(njCRS)
 
-## method used for this will either be BFS or DFS, since every node will eventually be visited.
-## determine starting point.  
-#search for long strings of zeroes, have conditions regarding the stretch; check reqs doc, wrote it down.  
-randomSeed=np.random.default_rng()
+    ### Get the road names and make entries for data not there
+    roadsGeoDF=roadsGeoDF[roadsGeoDF.geometry.type.isin(['LineString', 'MultiLineString'])]
+    if 'name' not in roadsGeoDF.columns:
+        roadsGeoDF['name'] = "Unnamed Road"
+    roadsGeoDF['name'] = roadsGeoDF['name'].fillna("Unnamed Road")
 
-###choose a random pixel within the matrix
-def findRandomBlackPixel(matrix,rng):
-    pixelFound=0
-    ###continually checks if the condition is not fulfilled
-    while(pixelFound==0):
-        randomRow=rng.integers(0,matrix.shape[0])
-        randomCol=rng.integers(0,matrix.shape[1])
-        pixelVal=matrix[randomCol,randomRow]
-        if(pixelVal==0.0):
-            pixelFound=1
-            return (randomCol,randomRow) #Col (x), and Row (y) to keep in line with standard notation.                 
+    ###Aggregate lines by name and combine geometric native lengths
+    dissolvedGeoDF=roadsGeoDF.dissolve(by='name', as_index=False)
+
+    ###Fialize the dataframe as a copy of the geometry and name, then assign length to the geometry metric (length) to the df and sort by length
+    unsortedDataframe=dissolvedGeoDF[['name', 'geometry']].copy()
+    unsortedDataframe['total_length_feet']=unsortedDataframe['geometry'].length
+    sortedDataframe=unsortedDataframe.sort_values(by='total_length_feet', ascending=False).reset_index(drop=True)
+
+    ###Note, unnamed in this case is the length of all extra roads, shoulder, unnamed paths that aren't registered as streets, etc.  Remove them for now.  Can be added later.  
+    finalDataframe=sortedDataframe[sortedDataframe['name']!='Unnamed Road'].reset_index(drop=True)
     
-### explore outwards until an end is met by all pixels.  NOTE: if end is at 5000 or 0, then note that as an edge of the graph.  
-def breadthCheck(matrix,pixel):
-    curPixelCol,curPixelRow = pixel #def current pixel
-    terminalPoints=0 #track number of terminations
-    terminalPositions={} #track terminal positions of each n.  
-
-    ###store as dictionary for modification and transfer ease.  While position stores the current position of the pixel at hand, direction stores the movement constants.  
-    curMovement={
-        'n1':{'position':[curPixelCol,curPixelRow+1],'direction':[0,1]},
-        'n2':{'position':[curPixelCol+1,curPixelRow],'direction':[1,0]},
-        'n3':{'position':[curPixelCol,curPixelRow-1],'direction':[0,-1]},
-        'n4':{'position':[curPixelCol,curPixelRow-1],'direction':[-1,0]},
-        'n5':{'position':[curPixelCol+1,curPixelRow+1],'direction':[1,1]},
-        'n6':{'position':[curPixelCol-1,curPixelRow+1],'direction':[-1,1]},
-        'n7':{'position':[curPixelCol+1,curPixelRow-1],'direction':[1,-1]},
-        'n8':{'position':[curPixelCol-1,curPixelRow-1],'direction':[-1,-1]}
-    }
-
-    activePixels=list(curMovement.keys()) #store active keys
-
-    ###main loop body; move each out by one until it hits a wall.  
-    while terminalPoints<8:
-        nextActivePixels=[] #store the new list of active pixels
-
-        ###Run through active pixels so long as they haven't reached a terminating point.  
-        for pixel in activePixels:
-            currPixel=curMovement[pixel]
-            
-            ###increase the current position by its correct amount (widest applicable)
-            currPixel['position'][0]+=currPixel['direction'][0]
-            currPixel['position'][1]+=currPixel['direction'][1]
-
-            ###track the current column and current row
-            curCol=currPixel['position'][0]
-            curRow=currPixel['position'][1]
-
-            if -1<curCol<5001 and -1<curRow<5001:
-                if matrix[curCol,curRow]!=0.0: #check if it's a nonblack pixel
-                    #if so, ensure that the terminal positions are properly entered.  
-                    terminalPositions[pixel]=[curCol,curRow]
-                    terminalPoints+=1
-                else:
-                    nextActivePixels.append(pixel)
-        activePixels=nextActivePixels
-
-    #at this point now, we have all of the terminal points.  We now need to measure their distance from the origin
-    terminalPositions=dict(sorted(terminalPositions.items()))
-
-    #next we basically want to check their distance each from the origin point to determine the size of the area (and general shape)
-    #because, there is a general need to know the shape so that it isn't a small, disconnected blob.
-    #additionally, there are some ghost darks from trees that can be addressed in later updates.  
-    distFromOrigin={'n1':None,'n2':None,'n3':None,'n4':None,'n5':None,'n6':None,'n7':None,'n8':None}
-    originPixel=[curPixelCol,curPixelRow]
-
-    ##Here it just gets the Euclidean Distance between the origin and the points.  
-    for pixel in terminalPositions:
-        currPixel=curMovement[pixel]
-        pixelC=currPixel['position'][0]
-        pixelR=currPixel['position'][1]
-        farPixel=[pixelC,pixelR]
-        #calculate Euclidean Distance (Norm)
-        distance=math.dist(originPixel,farPixel)
-        #now enter that into the distFromOrigin
-        distFromOrigin[pixel]=distance
-
-    ###print out some of them for funsies.  
-    print(terminalPositions)
-    print(terminalPoints)
-    print(distFromOrigin)
+    return finalDataframe
 
 
+### Interval samples (Add and subtract avg roadway width from height and subtract 50 for Left Upper Bound, add 50 for Right lower bound.
 
-###For testing's sake
-contrastImg=basicRoadProcessing(imageName)
+def sampleIntervals(roadGeometry,stepsInFeet=50): #set default to 50, but generally will be reflective of whatever is best for the CNN
+    ### Check first if the intervals are empty or not; if so, quit.  Won't be but better to be safe lol.
+    if roadGeometry.is_empty:
+        return []
 
-col,row=findRandomBlackPixel(contrastImg,randomSeed)
-pixel=(col,row)
-breadthCheck(contrastImg,pixel)
+    ### Check if its a multilinestring, which is what it sounds like.  If so, convert.  If it doesn't convert, try, try again.  
+    if roadGeometry.geom_type=='MultiLineString':
+        roadGeometry=linemerge(roadGeometry)
+        if roadGeometry.geom_type=='MultiLineString':
+            roadGeometry=max(list(roadGeometry.geoms),key=lambda l: l.length)
+
+    ### Get the total length of the road
+    totalLength=roadGeometry.length
+
+    ###Array of distances along the road spaced by the specified interval
+    distances=np.arange(0,totalLength,stepsInFeet)
+
+    if distances[-1]<totalLength:
+        distances=np.append(distances,totalLength)
+
+    ###Interpolate the dataset to grav tge exact x and y coordinates along a road at that specific distance interval.  
+    sampledPoints=[]
+    changeOverStep=1.0 #small 1 foot step change to determine the direction of propagation
+    for d in distances:
+        pointInit=roadGeometry.interpolate(d)
+        lookahead=d+changeOverStep if (d+changeOverStep)<=totalLength else d-changeOverStep #check behind if at the absolute end.  
+
+        interpLooka=roadGeometry.interpolate(lookahead)
+
+        if (d+changeOverStep<=totalLength):
+            dx=interpLooka.x-pointInit.x
+            dy=interpLooka.y-pointInit.y
+        else:
+            dx=pointInit.x-interpLooka.x
+            dy=pointInit.y-interpLooka.y
+
+        ###Calculate angle of propagation
+        propAngle=(np.degrees(np.arctan2(dx,dy))+360)%360 ### 0-360 degrees, 0=North, clockwise.  NESW direction.  
+
+        
+        sampledPoints.append({'x':pointInit.x,'y':pointInit.y,'distanceFromStarting':d,'propAngle':propAngle})
+
+    ###Now take sample points and convert it back into actual pixel coordinates
+    return sampledPoints
+
+### Now for each output of points in samplePoints, manipulate so that the coordinates are exactly as follows
+def sampleScreenshotCoordinates(samplePoints,sampleDistance):
+    ###for each value in samplePoints
+    screenshotCoordinates=[] #ret
+    for point,i in enumerate(samplePoints):
+        xC=point['x']
+        yC=point['y']
+        distanceFromStartC=point['distanceFromStarting'] #find whether it is the first point; if so, the create special case for first and last
+        propAngleC=point['propAngle']
+
+        ###normalize the angle
+        normalizedPropAngle=propAngleC%90
+        
+
+        ###Now check propagation angle; if relatively close to zero or 180, it is a vertical straight road (or relatively); conversely, if it is 90 or 270, it is a horizontal road.
+        ###If it is closer to 45, 135, 225, or 315, then the road is diagonal.
+        ###Decision is to modify this based on the angle of the road
+        isDiagonal=(normalizedPropAngle>=22.5)and(normalizedPropAngle<=67.5)
+
+        axisAngle=propAngleC%180 #makes it easier to tell if it's E/W or N/S
+
+        isHorizontal=not(isDiagnonal)and(axisAngle>45)and(axisAngle<135)
+        isVertical=(not(isDiagonaland))and(not(isHorizontal))
+
+        ###Now filter for output
+        if (isDiagonal==True):
+            pass
+        if (isHorizontal==True):
+            pass
+        if (isVertical==True):
+            pass
+        
+        #### CONTINUE HERE
+
+###Def files
+tiffPath = "sampleimage_closetohome.tif"
+outputFilename = "roads_highlighted.jpg"
+
+### Extract data from the tiffpath
+sectorRoadsDF=roadsFromSector(tiffPath,outputFile=False)
+roadGeometries=sectorRoadsDF.loc[0,'geometry'] #take only the first one
+roadName=sectorRoadsDF.loc[0,'name'] #take only the first name
+
+###Distance you want each sample point to be by in feet
+sampleDistance=50 
+
+samplePoints=sampleIntervals(roadGeometries,sampleDistance) #now that i have sample points, create a function that essentially fills in the gaps
+
+print(samplePoints)
 
 
-##for show
-plt.imshow(contrastImg,cmap='gray') 
-plt.show()
+#### SCRAP CODE
+'''
+####Display purposes only.
+print(f"Creating blank {height}x{width} matrix layer...")
+isolated_matrix = np.zeros((height, width), dtype=np.uint8)
+
+print("Rasterizing isolated vectors into the grid...")
+geometries = roads_gdf.geometry
+base_mask = rasterize(
+    [(geom, 255) for geom in geometries if geom.is_valid],
+    out_shape=(height, width),
+    transform=transform,
+    fill=0,
+    dtype='uint8'
+)
+
+# 3. Apply structural thickening directly to the matrix lines
+print(f"Thickening matrix paths to {ROAD_LINE_THICKNESS_PIXELS} pixels...")
+kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (ROAD_LINE_THICKNESS_PIXELS, ROAD_LINE_THICKNESS_PIXELS))
+final_matrix = cv2.dilate(base_mask, kernel)  ###this matrix is what will be used
+###Invert matrix so white is bg and black is roads
+matrixInv=255-final_matrix
+
+# 4. Save out the isolated matrix layer for display
+print(f"Writing isolated road matrix to {outputFilename}...")
+cv2.imwrite(outputFilename, matrixInv, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
+
+print("Finished successfully!")
+'''
