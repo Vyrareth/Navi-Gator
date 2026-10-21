@@ -1,5 +1,5 @@
 ###|====================================================|###
-###|SATELLITE IMAGE ROAD COORDINATE FINDER 1.0          |###
+###|     SATELLITE IMAGE ROAD COORDINATE FINDER 1.0     |###
 ###|====================================================|###
 
 ### PROGRAM WRITTEN BY DON FRENZEL
