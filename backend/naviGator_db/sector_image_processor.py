@@ -217,3 +217,99 @@ def roadGrabPipe(tiffPath,tiffSize,sampleDistance=50):
 
     return flattenedData
     
+### This is the section for all of my bullshit and datavis
+'''
+### TESTING HERE
+###Def files
+tiffPath = "sampleimage_closetohome.tif"
+tiffString="/users/documents/report_2026_final.csv"
+cutTiffString=tiffString.split("/")[-1]
+tiffSize = 5000
+print("Sector Name: ",sectorName)
+
+outputFilename = "roads_highlighted.jpg"
+
+### Extract data from the tiffpath
+sectorRoadsDF,dataTransform=roadsFromSector(tiffPath,outputFile=False)
+roadGeometries=sectorRoadsDF.loc[0,'geometry'] #take only the first one
+roadName=sectorRoadsDF.loc[0,'name'] #take only the first name
+
+###Distance you want each sample point to be by in feet
+sampleDistance=50 
+
+samplePoints=sampleIntervals(roadGeometries,sampleDistance) #now that i have sample points, create a function that essentially fills in the gaps
+
+print("These are all of the roads and their lengths in feet in the sector")
+print("These are the sample points for the first road, which is Westfield Ave. at the sample interval of 50 ft.")
+
+### This outputs the coordinates for a single road
+sectorName='CC_5E'
+windowCoords = sampleScreenshotCoordinates(samplePoints, sampleDistance, dataTransform, sectorName,roadName,5000,5000)
+
+df=pd.DataFrame(windowCoords)
+print(df)
+
+###
+###AI GEN DATAVIZ (kinda annoying but i don't feel like writing it myself atp :P )
+def normalize_raster(arr):
+    """Normalize 16-bit/float raster values to 0-255 uint8 for Matplotlib display"""
+    arr = arr.astype(np.float32)
+    # Clip to 2nd and 98th percentiles to avoid washed-out or blown-out contrast
+    p2, p98 = np.percentile(arr, (2, 98))
+    arr = np.clip(arr, p2, p98)
+    if p98 > p2:
+        arr = (arr - p2) / (p98 - p2)
+    return (arr * 255).astype(np.uint8)
+
+
+with rasterio.open(tiffPath) as dataset:
+    img_width = dataset.width
+    img_height = dataset.height
+    
+    # Read the image. 
+    # If it's a standard RGB image (3 bands): shape will be (3, height, width)
+    # If it's a single-band grayscale image: shape will be (1, height, width)
+    if dataset.count >= 3:
+        # Read first 3 bands (RGB) and transpose from (Bands, H, W) to (H, W, Bands) for plotting
+        img_array = dataset.read([1, 2, 3])
+        img_array = np.moveaxis(img_array, 0, -1)
+        img_array = normalize_raster(img_array)
+    else:
+        # Grayscale / single band
+        img_array = dataset.read(1)
+        img_array = normalize_raster(img_array)
+
+        
+# 2. Set up the Matplotlib plot
+fig, ax = plt.subplots(figsize=(10, 10))
+
+# Display the image
+if img_array.ndim == 3:
+    ax.imshow(img_array)
+else:
+    ax.imshow(img_array, cmap='gray')
+
+# 3. Loop through your window metadata and draw rectangles
+for box in windowCoords:
+    ul_col, ul_row = box['ULCoords']
+    window_size = 50
+    
+    # Create a Rectangle patch (Parameters: xy=(x, y), width, height)
+    # Note: In pixel space, x = column, y = row
+    rect = patches.Rectangle(
+        (ul_col, ul_row),             
+        window_size, window_size,     
+        linewidth=1.5, 
+        edgecolor='cyan',             
+        facecolor='none'
+    )
+    
+    ax.add_patch(rect)
+
+ax.set_title(f"Road Window Chips ({len(windowCoords)} Extracted Regions)")
+ax.set_xlabel("Pixel Column")
+ax.set_ylabel("Pixel Row")
+
+plt.tight_layout()
+plt.show()
+'''
