@@ -7,20 +7,36 @@
 ### Vers History:
 ### 1.0 - 20.10.2026
 
+### =====================================================================================================================================================================================
 ### Desc:  This program takes the input of a sector image .tiff file and outputs a pandas df possessing all data necessary to mesh with screenshot program to display viable candidates
-###        for extraction.  UL, LR positions (i.e northwestmost and southeastmost).  
+###        for extraction.  UL, LR positions (i.e northwestmost and southeastmost).
+###        Note the pipeline function, which should be the last.  It manages all other functions, the process of which is as follows:
+###        .tiff sector file input => roadsFromSector() => roadsDF => sampleIntervals() => fullPoints Dataframe => sampleScreenshotsCoordinates() => coordinate data dataframe (result)
+###
+###        Input into Pipeline: tiffPath (filepath), tiffSize (always 5000 by 5000), sampleDistance (how many feet between samples, default is 50).
+###        Output of Pipeline: Pandas Dataframe which includes the following: SectorName, RoadName, intervalNum (per road, iterable), UL Coords (tuple), and LR Coords (tuple).
+
+###        Also, please note that while I haven't run the pipeline function itself yet, every part of it has been run and the function is just a translation.  
+### =====================================================================================================================================================================================
+
 
 ###Imports
-import rasterio
-import cv2
 import numpy as np
 import pandas as pd
-import geopandas as gpd
-from rasterio.features import rasterize
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
+
+import cv2
+import rasterio
 import rasterio.transform
+import geopandas as gpd
 import osmnx as ox
+
+from rasterio.features import rasterize
 from pyproj import Transformer
 from shapely.ops import linemerge
+from pathlib import Path
+from itertools import chain
 
 ###Force OSMnx to use a backup public mirror instead of the overloaded German server
 ###The community server 'overpass.private.coffee' or public 'overpass.openstreetmap.fr' are excellent alternatives
@@ -79,9 +95,9 @@ def roadsFromSector(tiffImagePath,outputFile=False):
     sortedDataframe=unsortedDataframe.sort_values(by='total_length_feet', ascending=False).reset_index(drop=True)
 
     ###Note, unnamed in this case is the length of all extra roads, shoulder, unnamed paths that aren't registered as streets, etc.  Remove them for now.  Can be added later.  
-    finalDataframe=sortedDataframe[sortedDataframe['name']!='Unnamed Road'].reset_index(drop=True)
-    
-    return finalDataframe
+    fullDataframe=sortedDataframe[sortedDataframe['name']!='Unnamed Road'].reset_index(drop=True)
+    dataTransform=dataset.transform
+    return fullDataframe, dataTransform
 
 
 ### Interval samples (Add and subtract avg roadway width from height and subtract 50 for Left Upper Bound, add 50 for Right lower bound.
@@ -132,82 +148,72 @@ def sampleIntervals(roadGeometry,stepsInFeet=50): #set default to 50, but genera
     return sampledPoints
 
 ### Now for each output of points in samplePoints, manipulate so that the coordinates are exactly as follows
-def sampleScreenshotCoordinates(samplePoints,sampleDistance):
-    ###for each value in samplePoints
+def sampleScreenshotCoordinates(samplePoints,sampleDistance,datasetTransform,sectorName,roadName,imageWidth,imageHeight):
+    feetPerPixel=datasetTransform[0]
+
+    windowSizePixels=int(sampleDistance/feetPerPixel) ###Sliding window in size pixels
+
+    if (windowSizePixels%2)!=0:
+        windowSizePixels+=1
+        
+    halfWind=windowSizePixels//2
+    ###for each value in samplePoints\
+    curPointIndex=0
     screenshotCoordinates=[] #ret
-    for point,i in enumerate(samplePoints):
+    for i,point in enumerate(samplePoints):
         xC=point['x']
         yC=point['y']
         distanceFromStartC=point['distanceFromStarting'] #find whether it is the first point; if so, the create special case for first and last
         propAngleC=point['propAngle']
 
-        ###normalize the angle
-        normalizedPropAngle=propAngleC%90
+        ###convert into pixels
+        r,c=rasterio.transform.rowcol(datasetTransform,xC,yC)
+        rCenter,cCenter=int(r),int(c)
+
+        ULcol=cCenter-halfWind
+        ULrow=rCenter-halfWind
+        LRcol=ULcol+windowSizePixels
+        LRrow=ULrow+windowSizePixels
+
+        ###Filter coordinates not within the actual range/scope of the .tiff image
+        if not (0<=ULcol and 0<=ULrow and LRcol<=imageWidth and LRrow<=imageHeight):  
+            continue #skip the other steps if not satisfactory
         
+        screenshotCoordinates.append({'SectorName':sectorName,'RoadName':roadName,'intervalNum':curPointIndex,'ULCoords':(ULcol,ULrow),'LRCoords':(LRcol,LRrow)})
+        curPointIndex+=1
 
-        ###Now check propagation angle; if relatively close to zero or 180, it is a vertical straight road (or relatively); conversely, if it is 90 or 270, it is a horizontal road.
-        ###If it is closer to 45, 135, 225, or 315, then the road is diagonal.
-        ###Decision is to modify this based on the angle of the road
-        isDiagonal=(normalizedPropAngle>=22.5)and(normalizedPropAngle<=67.5)
+    return screenshotCoordinates
 
-        axisAngle=propAngleC%180 #makes it easier to tell if it's E/W or N/S
+### Create a pipeline for grabbing all viable road coordinates in an area. ###Tiff name is the name of the Sector. 
+def roadGrabPipe(tiffPath,tiffSize,sampleDistance=50):
+    ###Grab the sector name from the tiffName
 
-        isHorizontal=not(isDiagnonal)and(axisAngle>45)and(axisAngle<135)
-        isVertical=(not(isDiagonaland))and(not(isHorizontal))
+    ##tiffName is the last bit of the file
+    cutTiff=tiffPath.split("/")[-1] #grab last file value in extension    
+    sectorName=cutTiff.split(".")[0] # "CC_1E"
+    
+    ###Create a dataframe for output
+    allCoords=[] #nested list which contains all lists.  
 
-        ###Now filter for output
-        if (isDiagonal==True):
-            pass
-        if (isHorizontal==True):
-            pass
-        if (isVertical==True):
-            pass
+    ###Get the roads of the sector's dataframe
+    sectorRoadsDF,dataTransform=roadsFromSector(tiffPath,outputFile=False)
+    
+    ###Get all of these into a pipeline
+    for i in len(sectorRoadsDF):
+        roadGeometries=sectorRoadsDF.loc[i,'geometry'] 
+        roadName=sectorRoadsDF.loc[i,'name']
         
-        #### CONTINUE HERE
+        ###compile all sample points for that specific road.
+        samplePoints=sampleIntervals(roadGeometries,sampleDistance) #now that i have sample points, create a function that essentially fills in the gaps
+        ###grab all window coordinates for that road
+        windowCoords=sampleScreenshotCoordinates(samplePoints, sampleDistance, dataTransform,sectorName,roadName,tiffSize,tiffSize)
+        allCoords.append(windowCoords)
 
-###Def files
-tiffPath = "sampleimage_closetohome.tif"
-outputFilename = "roads_highlighted.jpg"
+    ### Flatten the data into a single list of dictionaries
+    flattenedData=list(chain.from_interable(allCoords))
+    
+    ### Make that flattened data into a dict
+    allRoadData=pd.DataFrame(flattenedData)
 
-### Extract data from the tiffpath
-sectorRoadsDF=roadsFromSector(tiffPath,outputFile=False)
-roadGeometries=sectorRoadsDF.loc[0,'geometry'] #take only the first one
-roadName=sectorRoadsDF.loc[0,'name'] #take only the first name
-
-###Distance you want each sample point to be by in feet
-sampleDistance=50 
-
-samplePoints=sampleIntervals(roadGeometries,sampleDistance) #now that i have sample points, create a function that essentially fills in the gaps
-
-print(samplePoints)
-
-
-#### SCRAP CODE
-'''
-####Display purposes only.
-print(f"Creating blank {height}x{width} matrix layer...")
-isolated_matrix = np.zeros((height, width), dtype=np.uint8)
-
-print("Rasterizing isolated vectors into the grid...")
-geometries = roads_gdf.geometry
-base_mask = rasterize(
-    [(geom, 255) for geom in geometries if geom.is_valid],
-    out_shape=(height, width),
-    transform=transform,
-    fill=0,
-    dtype='uint8'
-)
-
-# 3. Apply structural thickening directly to the matrix lines
-print(f"Thickening matrix paths to {ROAD_LINE_THICKNESS_PIXELS} pixels...")
-kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (ROAD_LINE_THICKNESS_PIXELS, ROAD_LINE_THICKNESS_PIXELS))
-final_matrix = cv2.dilate(base_mask, kernel)  ###this matrix is what will be used
-###Invert matrix so white is bg and black is roads
-matrixInv=255-final_matrix
-
-# 4. Save out the isolated matrix layer for display
-print(f"Writing isolated road matrix to {outputFilename}...")
-cv2.imwrite(outputFilename, matrixInv, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
-
-print("Finished successfully!")
-'''
+    return flattenedData
+    
