@@ -34,10 +34,9 @@
 #        change the coordinates and file name there
 #
 #   Press Esc to stop. In a connect_sector_direct.py run this stops the whole run.
-
-
 import csv
 import ctypes
+import math
 import os
 import sys
 import time
@@ -45,9 +44,10 @@ import tkinter as tk
 
 import numpy as np
 import pyautogui
-from PIL import Image, ImageTk
+from PIL import Image, ImageFilter, ImageTk
 
 STEP = 2.0 # zoom per scroll notch
+SMOOTH = 0.8  # blur (in image pixels) before zooming, to soften blocky pixels; 0 = off, ~1.5 = very soft
 stopped = {"esc": False}  # set when Esc is pressed so a CSV run stops too
 
 
@@ -101,9 +101,16 @@ def capture(ul, lr, sector_img_file, img=None):
 
     def draw():
         s = view["scale"]
-        frame = img.transform((W, H), Image.Transform.AFFINE,
-                              (1 / s, 0, cx - W / (2 * s), 0, 1 / s, cy - H / (2 * s)),
-                              Image.Resampling.NEAREST)
+        # only the part of the image that's on screen (+2 px so the blur has neighbors)
+        left, top = cx - W / (2 * s), cy - H / (2 * s)
+        part_box = (math.floor(left) - 2, math.floor(top) - 2,
+                    math.ceil(left + W / s) + 2, math.ceil(top + H / s) + 2)
+        part = img.crop(part_box)
+        if SMOOTH > 0:
+            part = part.filter(ImageFilter.GaussianBlur(SMOOTH))
+        frame = part.transform((W, H), Image.Transform.AFFINE,
+                               (1 / s, 0, left - part_box[0], 0, 1 / s, top - part_box[1]),
+                               Image.Resampling.BICUBIC)  # smooth instead of blocky pixels
         view["photo"] = ImageTk.PhotoImage(frame)
         canvas.delete("all")
         canvas.create_image(0, 0, anchor="nw", image=view["photo"])
