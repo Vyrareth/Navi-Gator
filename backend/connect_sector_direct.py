@@ -10,8 +10,7 @@
 #   <Sector>/<Sector>_<Road_Name>_000.png   
 #
 # BEFORE RUNNING
-#   - Put this file in the same folder as sectorCoordinateProcessor.py and SimpleAutoclickerV1.py. and the tiff
-#   - The testing section in sectorCoordinateProcessor.py must be inside ''' ''' or it runs on import.
+#   - Put this file in the same folder as sectorCoordinateProcessor.py and SimpleAutoclickerV1.py. and the TIFF
 #   - Windows display scaling must be 100%. Needs internet (roads come from OpenStreetMap).
 #   - Don't touch the mouse while it runs. Press Esc to stop.
 # =====================================================================================
