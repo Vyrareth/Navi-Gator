@@ -29,7 +29,7 @@
 #        finds every road box in the sector and screenshots each one; pictures are
 #        renamed to <Sector>/<Sector>_<Road_Name>_000.png
 #        (see connect_sector_direct.py for more options)
-#   One box (test):             python SimpleAutoclickerV.py
+#   One box (test):             python SimpleAutoclicker.py
 #        uses the capture((ULx, ULy), (LRx, LRy), "<Sector>.tif") line at the bottom -
 #        change the coordinates and file name there
 #
