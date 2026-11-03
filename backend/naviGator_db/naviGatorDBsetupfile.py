@@ -1,94 +1,92 @@
-### DON FRENZEL - SQL Database Setup Code for Navi-Gator 1.0
+### DON FRENZEL - SQL Database Setup Code for Navi-Gator
+
+### Vers. 2.0
 
 import sqlite3
 
-###'Connect' to database, specifically database made for the sat images.  
-conn=sqlite3.connect('naviGator_camcounty_db.db')
-cursor=conn.cursor() #basically allows for SQL commands to be made at all
-
 ### Run table creation ###
-### State table only exists for the sake of possible expansion; disregard and route only to NJ
+conn = sqlite3.connect('naviGator_camcountyUpdated_db.db')
+cursor = conn.cursor()
+
+### MANDATORY: Enable foreign key enforcement for this connection session
+cursor.execute('PRAGMA foreign_keys = ON;')
+
+### Create State Table
 cursor.execute('''
     CREATE TABLE IF NOT EXISTS state (
-        stateID INT NOT NULL,
+        stateID INTEGER,
         state_name VARCHAR(50),
-        PRIMARY KEY (stateID)
-    );
-''')
+        PRIMARY KEY (stateID));
+    ''')
 
-### county table exists only for the sake of expansion; disregard and route only to Camden County for now
+### Establish County Table (Integer primary key)
 cursor.execute('''
     CREATE TABLE IF NOT EXISTS county (
-		countyID INT NOT NULL,
-        stateID INT NOT NULL,
-        county_name VARCHAR(50),
-        PRIMARY KEY (countyID),
-        FOREIGN KEY (stateID) REFERENCES state(stateID)
-    );
-''')
+        countyID INTEGER PRIMARY KEY,
+        stateID INTEGER,
+        County_Name TEXT,
+        FOREIGN KEY (stateID) REFERENCES state (stateID)
+    ) STRICT;
+    ''')
 
-###Note, each sector is supposed to act basically like a square from the NJ satellite; data is to be recorded and stored per each
+### Establish Sector Table (Optimized String Key via WITHOUT ROWID)
 cursor.execute('''
     CREATE TABLE IF NOT EXISTS sector (
-        sectorID INT NOT NULL,
-        countyID INT NOT NULL,
-        sector_name VARCHAR(50),
-        sector_uleft_lat DECIMAL, -- may make these of NOT NULL type in the future but may not depending on need cases.  
-        sector_uleft_lon DECIMAL,
-        sector_lright_lat DECIMAL, 
-        sector_lright_lon DECIMAL, 
-		sector_file_loc VARCHAR(100) NOT NULL,
-        PRIMARY KEY (sectorID),
-        FOREIGN KEY (countyID) REFERENCES county(countyID)
-    );
-''')
+        sectorID TEXT PRIMARY KEY,
+        countyID INTEGER NOT NULL,
+        sector_Name TEXT,
+        sector_Uright_Lat REAL,
+        sector_Uright_Long REAL,
+        sector_Lleft_Lat REAL,
+        sector_Lleft_Long REAL,
+        FOREIGN KEY (countyID) REFERENCES county (countyID)
+    ) WITHOUT ROWID, STRICT;
+    ''')
 
-###Stores data for any particular road, note that road type specifically denotes the road's use classification, that being 
-###residential, Collector, Artery, & Freeway, which may help with future routing needs.  
+### Establish Road Table (Optimized String Key via WITHOUT ROWID)
 cursor.execute('''
     CREATE TABLE IF NOT EXISTS road (
-        roadID INT NOT NULL,
-        sectorID INT NOT NULL,
-        road_name VARCHAR(50),
-        road_type VARCHAR(50),
-        PRIMARY KEY (roadID),
-        FOREIGN KEY (sectorID) REFERENCES sector(sectorID)
-    );
-''')
+        roadID TEXT PRIMARY KEY,
+        sectorID TEXT NOT NULL,
+        road_Name TEXT,
+        FOREIGN KEY (sectorID) REFERENCES sector (sectorID)
+    ) WITHOUT ROWID, STRICT;
+    ''')
 
-###Segment is specifically for locating photo files for CNN analysis
+### Establish Segments Table (Integer primary key, RoadID typed as TEXT to fix mismatch)
 cursor.execute('''
-    CREATE TABLE IF NOT EXISTS segment (
-		segmentID INT NOT NULL, 
-        roadID INT NOT NULL, 
-        length_miles DECIMAL,
-        photo_file_loc VARCHAR(100) NOT NULL,
-        PRIMARY KEY (segmentID),
-        FOREIGN KEY (roadID) REFERENCES road(roadID)
-    );
-''')
+    CREATE TABLE IF NOT EXISTS segments (
+        segmentID INTEGER PRIMARY KEY,
+        roadID TEXT NOT NULL,
+        photo_file TEXT,
+        FOREIGN KEY (roadID) REFERENCES road (roadID)
+    ) STRICT;
+    ''')
 
 
 ### Data entry here
 
-###RUN THESE IF AND ONLY IF YOU NEED TO POPULATE YOUR DATABASE
+###RUN THESE IF AND ONLY IF YOU NEED TO POPULATE YOUR DATABASE INITIALLY
+
 ### New Jersey StateID is 3 (Since we were the third to ratify the constitution)
-#cursor.execute("INSERT INTO state (stateID,state_name) VALUES (?,?)", (3,"New Jersey"))
-#cursor.execute("INSERT INTO state (stateID,state_name) VALUES (?,?)", (2,"Pennsylvania"))
+#cursor.execute('INSERT INTO state (stateID,state_name) VALUES (?,?)', (3,'New Jersey'))
+#cursor.execute('INSERT INTO state (stateID,state_name) VALUES (?,?)', (2,'Pennsylvania'))
 
 ###NOTE: For County entry, please refer to the FIPS Codes (First two digits indicate state, last three indicate county: NJ is 34 for State and Camden County is 007, in this case just 7)
-#cursor.execute("INSERT INTO county (countyID,stateID,county_name) VALUES (?,?,?)", (7,3,"Camden County"))
+#cursor.execute('INSERT INTO county (countyID,stateID,county_name) VALUES (?,?,?)', (7,3,'Camden County'))
 
+###Also blank this out
 #conn.commit()
 
 ###
-cursor.execute("SELECT * FROM county")
+cursor.execute('SELECT * FROM county')
 rows=cursor.fetchall()
 
-print("countyID","\t","stateID","\t","County Name\n")
+print('countyID','\t','stateID','\t','County Name\n')
 for row in rows:
-    #print(row[0],"\t\t",row[1])
-    print(row[0],"\t\t",row[1],"\t\t",row[2])
+    #print(row[0],'\t\t',row[1])
+    print(row[0],'\t\t',row[1],'\t\t',row[2])
+
 
 conn.close()
 
