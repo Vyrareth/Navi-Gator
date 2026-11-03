@@ -47,12 +47,7 @@ s3Client=boto3.client(service_name='s3',endpoint_url=f'https://{R2AcctID}.r2.clo
 
 ###Main loop (for all of them in the dataframe, grab name and pull from cloudflare.  Extract all .txt files and write them to another file.
 ### At the same time, update the database to have those specific data within them.
-###Object key is subject to change; need to have a xlsx file.
-
-
-### Define Database Structure
-
-
+###Object key is subject to change; need to have a csv file.
 
 ### Now runs for all i.  Keep in temporary memory
 for i in range(len(sectorList)):
