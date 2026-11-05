@@ -1,16 +1,14 @@
 # =====================================================================================
-# SimpleAutoclicker.py   (Windows)   V1.2
+# SimpleAutoclicker.py   (Windows)   V1.3 11/04/26
 # Part of Navi-Gator - screenshots road boxes from any sector image for the CNN dataset.
 # =====================================================================================
 # WHAT IT DOES
 #   Takes a box on a sector image (upper-left corner + lower-right corner, in pixels)
 #   and for each box:
 #     1. opens the image full-screen, centered on the box, starting 3 zoom notches out
-#     2. clicks once to give the window focus, then the autoclicker scrolls the mouse
-#        wheel to zoom in until one more notch would cut off part of the box
-#        (if a scroll doesn't register, it zooms anyway so it never gets stuck)
-#     3. zooms the last bit so the box touches the screen edges, moves the cursor
-#        out of the way and screenshots exactly the box
+#     2. clicks once to give the window focus, then does one big zoom straight to
+#        where the box touches the screen edges
+#     3. moves the cursor out of the way and screenshots exactly the box
 #     4. saves it as a lossless .png in a folder named after the sector file:
 #        <Sector>/<Sector>_001.png, _002.png, ...  (never overwrites earlier shots)
 #   The sector name comes from the file name:  CC_9C.tif -> CC_9C
@@ -34,6 +32,8 @@
 #        change the coordinates and file name there
 #
 #   Press Esc to stop. In a connect_sector_direct.py run this stops the whole run.
+
+
 import csv
 import ctypes
 import math
@@ -119,22 +119,11 @@ def capture(ul, lr, sector_img_file, img=None):
         view["scale"] *= STEP if event.delta > 0 else 1 / STEP
         draw()
 
-        # Step 1: autoclicker scrolls one notch at a time while the box still fits
+    # Step 1: one big zoom straight to where the box touches the screen edges
     def zoom_step():
-        s = view["scale"] * STEP
-        if (x2 - x1) * s <= W and (y2 - y1) * s <= H:
-            before = view["scale"]
-            pyautogui.scroll(120, x=W // 2, y=H // 2)  # 120 = one wheel notch on Windows
-            root.update()
-            if view["scale"] == before:                 # scroll didn't reach the window
-                view["scale"] *= STEP
-                draw()
-            root.after(100, zoom_step)
-        else:
-            # zoom the rest of the way so the box touches the screen edges
-            view["scale"] = min(W / (x2 - x1), H / (y2 - y1))
-            draw()
-            root.after(150, shoot)
+        view["scale"] = fit
+        draw()
+        root.after(150, shoot)
 
     # Steps 2 + 3: screenshot the box and save it in the sector folder as a lossless .png
     def shoot():
@@ -195,3 +184,10 @@ def capture_from_csv(sector_img_file, coords_csv):
             writer.writerow([os.path.basename(path), row["SectorName"], row["RoadName"],
                              row["intervalNum"], *ul, *lr])
             index_file.flush()
+
+#Testing 
+#if __name__ == "__main__":
+#    if len(sys.argv) == 3:
+#        capture_from_csv(sys.argv[1], sys.argv[2])
+#    else:
+#        capture((4932, 4506), (4982, 4556), "CC_14H.tif")   # row 0 of the table
