@@ -1,6 +1,6 @@
 ### DON FRENZEL - SQL Database Setup Code for Navi-Gator
 
-### Vers. 2.1
+### Vers. 2.2 updates by Cris 11/04
 
 import sqlite3
 
@@ -52,13 +52,14 @@ cursor.execute('''
         FOREIGN KEY (SectorID) REFERENCES Sector (SectorID)
     ) WITHOUT ROWID, STRICT;
     ''')
-
+###Change to have Primary Key of (RoadID, SegmentID) by Cris 11/04
 ### Establish Segments Table (Integer primary key, RoadID typed as TEXT to fix mismatch)
 cursor.execute('''
     CREATE TABLE IF NOT EXISTS Segments (
-        SegmentID INTEGER PRIMARY KEY,
+        SegmentID INTEGER NOT NULL,
         RoadID TEXT NOT NULL,
         Photo_file TEXT,
+        Primary Key (RoadID, SegmentID),
         FOREIGN KEY (RoadID) REFERENCES Road (RoadID)
     ) STRICT;
     ''')
