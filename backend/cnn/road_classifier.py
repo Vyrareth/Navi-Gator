@@ -1,12 +1,15 @@
 """
 road_classifier.py - load the trained Navi-Gator road-condition CNN and rate roads.
 
-You do NOT need any of the training code to use this. Put this file next to the trained
-model file (road_cnn.keras) and:
+You do NOT need any of the training code to use this. You DO need the trained model file
+**road_cnn.keras** sitting in the SAME folder as this file. It ships with this file in the
+repo (backend/cnn/road_cnn.keras), so a normal `git clone` / `git pull` gets both together.
+If you copied only this .py, download road_cnn.keras into the same folder before running.
 
+Usage:
     from road_classifier import load_model, classify_folder
 
-    model = load_model()                        # loads road_cnn.keras
+    model = load_model()                        # loads road_cnn.keras from this folder
     ratings = classify_folder("some_folder", model)
     print(ratings)
 
@@ -29,6 +32,13 @@ MODEL_PATH = os.path.join(os.path.dirname(__file__), "road_cnn.keras")
 
 def load_model(path=MODEL_PATH):
     """Load the trained CNN from disk (road_cnn.keras)."""
+    if not os.path.exists(path):
+        raise FileNotFoundError(
+            "\n\nroad_cnn.keras was not found next to road_classifier.py.\n"
+            "It lives in the repo at backend/cnn/road_cnn.keras and ships with this file -\n"
+            "a normal 'git clone' / 'git pull' gets it. If you only copied the .py, download\n"
+            "road_cnn.keras into the same folder as this script and run again.\n"
+        )
     return tf.keras.models.load_model(path)
 
 
