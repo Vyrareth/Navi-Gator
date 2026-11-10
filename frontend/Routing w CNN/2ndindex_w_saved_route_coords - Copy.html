@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    <title>Navi-Gator</title>
+    <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    />
+    
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+    <style>
+    #map {
+    height: 450px;
+    width: 100%;
+    margin-top: 20px;
+    border: 2px solid #333;
+    border-radius: 8px;
+    }
+    #routeSegments,
+    #saveRouteResult {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    }
+    .destination-field {
+    position: relative;
+    width: min(100%, 24rem);
+    margin-bottom: 1rem;
+    }
+    .destination-field label,
+    .destination-field input {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+    }
+    .location-suggestions {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    z-index: 1000;
+    max-height: 12rem;
+    overflow-y: auto;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    background: white;
+    border: 1px solid #777;
+    }
+    .location-suggestions[hidden] {
+    display: none;
+    }
+    .location-suggestions button {
+    width: 100%;
+    padding: 0.5rem;
+    border: 0;
+    background: white;
+    text-align: left;
+    cursor: pointer;
+    }
+    .location-suggestions button:hover,
+    .location-suggestions button:focus {
+    background: #e8f1f8;
+    }
+    </style>
+</head>
+<body>
+
+    <h1>Welcome to Navi-Gator!</h1>
+    
+    <h2>Plan Your Trip</h2>
+    {% if locations|length < 2 %}
+    <p role="status">At least two locations must be added to the database before you can plan a trip.</p>
+    {% endif %}
+    <!-- Starting Location -->
+    <div class="destination-field">
+        <label for="start">Starting Location:</label>
+        <input type="search" id="start" name="start"
+            value="{% for location in locations %}{% if loop.first %}{{ location.name }}{% endif %}{% endfor %}"
+            placeholder="Search starting locations" autocomplete="off"
+            role="combobox" aria-autocomplete="list" aria-controls="startSuggestions"
+            aria-expanded="false">
+        <ul class="location-suggestions" id="startSuggestions" role="listbox" hidden></ul>
+    </div>
+    
+    <!-- Destination -->
+    <div class="destination-field">
+        <label for="end">Destination:</label>
+        <input type="search" id="end" name="end"
+            value="{% for location in locations %}{% if loop.index == 2 %}{{ location.name }}{% endif %}{% endfor %}"
+            placeholder="Search destinations" autocomplete="off"
+            role="combobox" aria-autocomplete="list" aria-controls="endSuggestions"
+            aria-expanded="false">
+        <ul class="location-suggestions" id="endSuggestions" role="listbox" hidden></ul>
+    </div>
+    
+    <!-- Plan Trip Button -->
+     <button type="button" id="planRoute" {% if locations|length < 2 %}disabled{% endif %}>
+        Plan Trip
+    </button>
+    
+    <!-- Route Result -->
+     <p id="routeResult" aria-live="polite"></p>
+     <br>
+
+    <h2>Route Segments (JSON)</h2>
+    <pre id="routeSegments" aria-live="polite"></pre>
+    <button type="button" id="saveRoute" hidden>Save route</button>
+    <pre id="saveRouteResult" aria-live="polite"></pre>
+
+    <div id="map"></div>
+     
+     <h2>Available Locations</h2>
+     <ul>
+        {% for location in locations %}
+        <li>
+            {{ location.name }}
+            ({{ location.latitude }}, {{ location.longitude }})
+        </li>
+        {% endfor %}
+    </ul>
+    
+    <!-- JavaScript -->
+     <script>
+        const locationsByName = new Map();
+        const locationOptions = [];
+        {% for location in locations %}
+           {
+           const locationId = {{ location['id'] | tojson }};
+           const locationName = {{ location['name'] | tojson }};
+           const coordinates = [
+               {{ location['latitude'] }},
+               {{ location['longitude'] }}
+           ];
+           const normalizedName = locationName.trim().toLowerCase();
+           const matches = locationsByName.get(normalizedName) || [];
+           const locationOption = { id: locationId, name: locationName, coordinates };
+           matches.push(locationOption);
+           locationsByName.set(normalizedName, matches);
+           locationOptions.push(locationOption);
+           }
+           {% endfor %}
+
+        const map = L.map('map').setView([39.9526, -75.1652], 11);
+
+     // Add the map tiles
+     L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap contributors'
+     }).addTo(map);
+
+     let routeLayer = null;
+     let plannedRouteLocationIds = null;
+     let plannedRouteData = null;
+     let plannedRouteCandidates = [];
+     window.routeSegments = [];
+
+     function findLocation(input) {
+        const matches = locationsByName.get(input.value.trim().toLowerCase());
+        return matches && matches.length === 1 ? matches[0] : null;
+     }
+
+     function attachLocationSuggestions(inputId, suggestionsId) {
+        const input = document.getElementById(inputId);
+        const suggestions = document.getElementById(suggestionsId);
+
+        function updateSuggestions() {
+            const query = input.value.trim().toLowerCase();
+            const matchingLocations = locationOptions.filter(location =>
+                location.name.toLowerCase().includes(query)
+            );
+            suggestions.replaceChildren();
+
+            for (const location of matchingLocations) {
+                const item = document.createElement("li");
+                item.setAttribute("role", "option");
+                const option = document.createElement("button");
+                option.type = "button";
+                option.textContent = location.name;
+                option.addEventListener("mousedown", event => event.preventDefault());
+                option.addEventListener("click", () => {
+                    input.value = location.name;
+                    suggestions.hidden = true;
+                    input.setAttribute("aria-expanded", "false");
+                    input.focus();
+                });
+                item.appendChild(option);
+                suggestions.appendChild(item);
+            }
+
+            suggestions.hidden = matchingLocations.length === 0;
+            input.setAttribute("aria-expanded", String(!suggestions.hidden));
+        }
+
+        input.addEventListener("focus", updateSuggestions);
+        input.addEventListener("input", updateSuggestions);
+        input.addEventListener("blur", () => {
+            suggestions.hidden = true;
+            input.setAttribute("aria-expanded", "false");
+        });
+     }
+
+     attachLocationSuggestions("start", "startSuggestions");
+     attachLocationSuggestions("end", "endSuggestions");
+
+     function extractRouteSegments(route) {
+        if (!Array.isArray(route.legs) || route.legs.length === 0) {
+            throw new Error("The route response did not include road segments.");
+        }
+
+        const segments = [];
+        for (const leg of route.legs) {
+            if (!Array.isArray(leg.steps)) {
+                throw new Error("The route response did not include road steps.");
+            }
+
+            for (const step of leg.steps) {
+                const coordinates = step.geometry && step.geometry.coordinates;
+                if (!Array.isArray(coordinates) || coordinates.length === 0) {
+                    throw new Error("A route step did not include start and end coordinates.");
+                }
+                if (coordinates.length === 1) {
+                    continue;
+                }
+
+                const [start, end] = [coordinates[0], coordinates[coordinates.length - 1]];
+                if (
+                    !Array.isArray(start) || start.length < 2 ||
+                    !Array.isArray(end) || end.length < 2 ||
+                    !Number.isFinite(start[0]) || !Number.isFinite(start[1]) ||
+                    !Number.isFinite(end[0]) || !Number.isFinite(end[1])
+                ) {
+                    throw new Error("A route step included invalid coordinates.");
+                }
+                if (
+                    coordinates.length === 2 &&
+                    start[0] === end[0] && start[1] === end[1]
+                ) {
+                    continue;
+                }
+
+                segments.push({
+                    "Roadname": typeof step.name === "string" && step.name.trim()
+                        ? step.name.trim()
+                        : "Unnamed road",
+                    "Start LatLon": [start[1], start[0]],
+                    "End LatLon": [end[1], end[0]]
+                });
+            }
+        }
+
+        if (segments.length === 0) {
+            throw new Error("The route response did not contain any road segments.");
+        }
+        return segments;
+     }
+
+     document.getElementById("planRoute").addEventListener("click", async function() {
+        const start = findLocation(document.getElementById("start"));
+        const end = findLocation(document.getElementById("end"));
+        const result = document.getElementById("routeResult");
+        const segmentsOutput = document.getElementById("routeSegments");
+        const saveButton = document.getElementById("saveRoute");
+        const saveResult = document.getElementById("saveRouteResult");
+        segmentsOutput.textContent = "";
+        saveButton.hidden = true;
+        saveResult.textContent = "";
+        plannedRouteLocationIds = null;
+        plannedRouteData = null;
+        plannedRouteCandidates = [];
+        window.routeSegments = [];
+
+        if (routeLayer) {
+            map.removeLayer(routeLayer);
+            routeLayer = null;
+        }
+
+        if (!start || !end) {
+            result.textContent = "Please choose both locations from the suggestions.";
+            return;
+        }
+
+        if (start.id === end.id) {
+            result.textContent = "Please choose two different locations.";
+            return;
+        }
+
+        const button = document.getElementById("planRoute");
+        button.disabled = true;
+        result.textContent = "Finding a driving route from " + start.name + " to " + end.name + "...";
+
+        try {
+            const coordinates = `${start.coordinates[1]},${start.coordinates[0]};${end.coordinates[1]},${end.coordinates[0]}`;
+            const response = await fetch(
+                `https://router.project-osrm.org/route/v1/driving/${coordinates}?overview=full&geometries=geojson&steps=true&alternatives=3`
+            );
+            if (!response.ok) {
+                throw new Error(`Routing service returned HTTP ${response.status}.`);
+            }
+
+            const data = await response.json();
+            if (data.code !== "Ok" || !data.routes || data.routes.length === 0) {
+                result.textContent = "No driving route could be found between these locations.";
+                return;
+            }
+
+            const route = data.routes[0];
+            plannedRouteCandidates = data.routes.slice(0, 5);
+            window.routeSegments = extractRouteSegments(route);
+            segmentsOutput.textContent = JSON.stringify(window.routeSegments, null, 2);
+
+            routeLayer = L.geoJSON(route.geometry, {
+                style: { color: "#1769aa", weight: 6, opacity: 0.8 }
+            }).addTo(map);
+            map.fitBounds(routeLayer.getBounds(), { padding: [50, 50] });
+            plannedRouteLocationIds = { start: start.id, end: end.id };
+            plannedRouteData = route;
+            saveButton.hidden = false;
+
+            const distance = (route.distance / 1000).toFixed(1);
+            const duration = Math.round(route.duration / 60);
+            result.textContent = `Driving route from ${start.name} to ${end.name}: ${distance} km, about ${duration} minutes.`;
+        } catch (error) {
+            result.textContent = error instanceof Error
+                ? error.message
+                : "Could not get a route. Check your internet connection and try again.";
+            console.error("Route lookup failed:", error);
+        } finally {
+            button.disabled = false;
+        }
+    });
+
+    document.getElementById("saveRoute").addEventListener("click", async function() {
+        const button = this;
+        const saveResult = document.getElementById("saveRouteResult");
+        if (!plannedRouteLocationIds) {
+            saveResult.textContent = "Plan a route before saving it.";
+            return;
+        }
+        button.disabled = true;
+        saveResult.textContent = "Saving route...";
+
+        try {
+            const response = await fetch("/api/saved-routes", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    start_id: plannedRouteLocationIds.start,
+                    end_id: plannedRouteLocationIds.end,
+                    route: plannedRouteData,
+                    route_candidates: plannedRouteCandidates
+                })
+            });
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.error || "Could not save this route.");
+            }
+            const sectors = Array.isArray(data.sectors) ? data.sectors : [];
+            const sectorMessage = sectors.length
+                ? ` Sectors found: ${sectors.join(", ")}.`
+                : " No matching sectors found.";
+            const imageMessage = data.downloaded_images
+                ? ` Classified ${data.downloaded_images} downloaded images.`
+                : " No matching sector images were available to classify.";
+            const missingImageCount = Array.isArray(data.missing_images)
+                ? data.missing_images.length
+                : 0;
+            const missingImageMessage = missingImageCount
+                ? ` ${missingImageCount} image files were missing from R2.`
+                : "";
+            const classifierOutput = data.classification_output
+                ? `\n${data.classification_output}`
+                : "";
+            const comparisons = Array.isArray(data.route_comparisons)
+                ? data.route_comparisons
+                : [];
+            const comparisonOutput = comparisons.map(candidate => {
+                const rating = candidate.cnn_average === null
+                    ? "CNN rating unavailable"
+                    : `CNN ${Number(candidate.cnn_average).toFixed(2)}/5`;
+                const duration = Math.round(candidate.duration / 60);
+                const selected = candidate.index === data.selected_route_index
+                    ? " (selected)"
+                    : "";
+                return `\nRoute ${candidate.index + 1}: ${rating}, ${duration} min${selected}`;
+            }).join("");
+            const routeSelectionNote = comparisons.length === 1
+                ? "\nOSRM returned only one candidate, so there was no alternative route to select."
+                : comparisons.every(candidate => candidate.cnn_average === null)
+                    ? "\nNo routes had available CNN ratings; the shortest travel-time candidate was selected."
+                    : "\nThe highest CNN average was selected; shortest travel time breaks ties.";
+
+            if (data.selected_route && data.selected_route.geometry) {
+                plannedRouteData = data.selected_route;
+                plannedRouteCandidates = [data.selected_route];
+                window.routeSegments = extractRouteSegments(data.selected_route);
+                document.getElementById("routeSegments").textContent =
+                    JSON.stringify(window.routeSegments, null, 2);
+                if (routeLayer) {
+                    map.removeLayer(routeLayer);
+                }
+                routeLayer = L.geoJSON(data.selected_route.geometry, {
+                    style: { color: "#16803c", weight: 7, opacity: 0.9 }
+                }).addTo(map);
+                map.fitBounds(routeLayer.getBounds(), { padding: [50, 50] });
+                const selectedDistance = (data.selected_route.distance / 1000).toFixed(1);
+                const selectedDuration = Math.round(data.selected_route.duration / 60);
+                document.getElementById("routeResult").textContent =
+                    `CNN-selected route: ${selectedDistance} km, about ${selectedDuration} minutes.`;
+            }
+            saveResult.textContent =
+                `Route ${data.id} saved with ${data.saved_segments} segments.${sectorMessage}${imageMessage}${missingImageMessage}${comparisonOutput}${routeSelectionNote}${classifierOutput}`;
+        } catch (error) {
+            saveResult.textContent = error instanceof Error
+                ? error.message
+                : "Could not save this route.";
+            console.error("Route save failed:", error);
+        } finally {
+            button.disabled = false;
+        }
+    });
+
+    // Create markers using locations from SQLite
+    {% for location in locations %}
+    L.marker([
+        {{ location.latitude }},
+        {{ location.longitude }}
+    ])
+    .addTo(map)
+    .bindPopup({{ location['name'] | tojson }});
+    {% endfor %}
+    
+    </script>
+</body>
+</html>

@@ -1,0 +1,3 @@
+Additional info:
+
+To run saving the route, before doing so, you must update the environmental variables CLOUDFLARE_R2_ACCESS_KEY_ID and CLOUDFLARE_R2_SECRET_ACCESS_KEY respectively on the terminal fit for environmental variables
