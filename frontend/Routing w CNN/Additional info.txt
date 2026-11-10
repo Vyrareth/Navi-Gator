@@ -1,3 +1,10 @@
 Additional info:
 
 To run saving the route, before doing so, you must update the environmental variables CLOUDFLARE_R2_ACCESS_KEY_ID and CLOUDFLARE_R2_SECRET_ACCESS_KEY respectively on the terminal fit for environmental variables
+
+Order of running the program:
+assure all files are in the same folder location on your device
+make sure the html is inside of a folder called "template"
+run 2ndtest_routing_app_updated - Copy.py, a server number of 0.0.0.0:0000 format should appear on the output screen, click on it to have a local connection
+click on 2 different destinations then click on "Plan Trip", a route should show from the 2 different points and segments w lats and longs 
+click on "Save Route" to utilize the CNN and output a new route based on rating and after it does its calculations, a new route should show
