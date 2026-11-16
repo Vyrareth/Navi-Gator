@@ -21,9 +21,11 @@ if cursor.fetchone()[0] == 0:
     cursor.executemany(
         "INSERT INTO locations (name, latitude, longitude) VALUES (?, ?, ?)",
         [
+            
             ("Camden, NJ", 39.9259, -75.1196),
             ("Philadelphia, PA", 39.9526, -75.1652),
             ("Trenton, NJ" , 40.2171, -74.7429),
+            ("Newark, NJ", 40.7357, -74.1724),
         ]
     )
 

@@ -30,24 +30,22 @@
     <h2>Plan Your Trip</h2>
     <!-- Starting Location -->
      <label for="start">Starting Location:</label>
-     <select id="start" name="start">
-        {% for location in locations %}
-        <option value="{{ location.id }}">
-            {{ location.name }}
-        </option>
-        {% endfor %}
-    </select>
+     <input
+        type="text"
+            id="start"
+            name="start"
+            placeholder="Enter starting address"
+    >
     <br><br>
     
     <!-- Destination -->
      <label for="end">Destination:</label>
-     <select id="end" name="end">
-        {% for location in locations %}
-        <option value="{{ location.id }}">
-            {{ location.name }}
-        </option>
-        {% endfor %}
-    </select>
+     <input
+        type="text"
+            id="end"
+            name="end"
+            placeholder="Enter destination address"
+    >
     <br><br>
     
     <!-- Plan Trip Button -->
@@ -65,8 +63,7 @@
      <ul>
         {% for location in locations %}
         <li>
-            {{ location.name }}
-            ({{ location.latitude }}, {{ location.longitude }})
+            {{ location['Road_Name'] }}
         </li>
         {% endfor %}
     </ul>
@@ -82,46 +79,131 @@
         ];
         {% endfor %}
 
-     document.getElementById("planRoute").addEventListener("click", function() {
+    async function getCoordinates(address){
+        const url = "https://nominatim.openstreetmap.org/search?" + 
+            new URLSearchParams({
+                q: address,
+                format: "json",
+                limit: 1
+            });
+        
+        const response = await fetch(url);
+        if (!response.ok) {
+            throw new Error("Address lookup failed");
+        }
+
+        const data = await response.json();
+        if (data.length === 0) {
+            throw new Error("Address not found");
+        }
+
+        return [
+            parseFloat(data[0].lat),
+            parseFloat(data[0].lon)
+        ];
+    }
+
+    async function getDrivingRoute(startCoords, endCoords) {
+        const url = "https://router.project-osrm.org/route/v1/driving/" +
+            startCoords[1] + "," + startCoords[0] + ";" +
+            endCoords[1] + "," + endCoords[0] +
+            "?overview=full&geometries=geojson&alternatives=3&steps=true";
+
+        const response = await fetch(url);
+
+        if (!response.ok) {
+            throw new Error("Routing service unavailable");
+        }
+
+        const data = await response.json();
+
+        if (data.code !== "Ok" || data.routes.length === 0) {
+            throw new Error("No route found");
+        }
+
+        return data.routes.slice(0, 3);
+    }
+
+     document.getElementById("planRoute").addEventListener("click", async function() {
         const start = document.getElementById("start");
         const end = document.getElementById("end");
         
-        const startName = start.options[start.selectedIndex].text.trim();
-        const endName = end.options[end.selectedIndex].text.trim();
+        const startName = start.value.trim();
+        const endName = end.value.trim();
         
         const result = document.getElementById("routeResult");
-        if (start.value === end.value) {
-            result.textContent = "Please select two different locations.";
+        if (startName === "" || endName === "") {
+            result.textContent = "Please enter both addresses.";
+        } else if (startName.toLowerCase() === endName.toLowerCase()) {
+            result.textContent = "Please enter two different addresses.";
         } else {
-            result.textContent = "Planning route from " + startName + " to " + endName + "...";
+            try {
+                result.textContent = "Searching for addresses...";
+            const startCoords = await getCoordinates(startName);
+            const endCoords = await getCoordinates(endName);
+
+            const routes = await getDrivingRoute(startCoords, endCoords);
+
+            console.log("Number of routes returned:", routes.length);
             
-            const startCoords = locationCooridinates[start.value];
-            const endCoords = locationCooridinates[end.value];
-            
-            map.fitBounds([startCoords, endCoords], { 
-                padding: [50, 50] 
+            let routeSummary = "Route from " + startName + " to " + endName + ":\n\n";
+
+            routes.forEach((route, index) => {
+                const miles = route.distance / 1609.344;
+                const minutes = Math.round(route.duration / 60);
+                const colors = ["blue", "green", "red"];
+
+                routeSummary += 
+                "Route " + (index + 1) + " (" + colors[index % colors.length] + "): " +
+                miles.toFixed(2) + " miles | " + 
+                minutes + " minutes.\n";
             });
+
+            result.textContent = routeSummary;
+            result.style.whiteSpace = "pre-line";
+
+            routeLines.forEach(line => map.removeLayer(line));
+            routeLines = [];
+
+            const routeColors = ["blue", "green", "red"];
+
+            routes.forEach((route, index) => {
+                const roadCoords = route.geometry.coordinates.map(
+                    coord => [coord[1], coord[0]]
+                );
+
+                const line = L.polyline(roadCoords, {
+                    color: routeColors[index % routeColors.length],
+                    weight: 5,
+                    opacity: 0.8
+                }).addTo(map);
+
+                routeLines.push(line);
+            });
+
+            if (routeLines.length > 0) {
+                const routeGroup = L.featureGroup(routeLines);
+
+                map.fitBounds(routeGroup.getBounds(), {
+                    padding: [50, 50]
+                });
+            } 
+
+        }catch (error) {
+            console.error(error);
+        }
     }
-    });
+}); 
     
     // Initialize the map
-    const map = L.map('map').setView([39.9526, -75.1652], 11); 
+    const map = L.map('map').setView([39.83, -74.98], 11); 
 
     // Add the map tiles
     L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '&copy; OpenStreetMap contributors'
     }).addTo(map);
 
-    // Create markers using locations from SQLite
-    {% for location in locations %}
-    L.marker([
-        {{ location.latitude }},
-        {{ location.longitude }}
-    ])
-    .addTo(map)
-    .bindPopup({{ location['name'] | tojson }});
-    {% endfor %}
-    
+    let routeLines = [];
     </script>
 </body>
 </html>
