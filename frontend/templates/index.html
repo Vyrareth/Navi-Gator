@@ -104,6 +104,7 @@
     }
 
     async function getDrivingRoute(startCoords, endCoords) {
+        
         const url = "https://router.project-osrm.org/route/v1/driving/" +
             startCoords[1] + "," + startCoords[0] + ";" +
             endCoords[1] + "," + endCoords[0] +
@@ -117,11 +118,69 @@
 
         const data = await response.json();
 
+        console.log("Number of routes returned:", data.routes.length);
+
+        console.log("OSRM response:", data.routes.length, "routes");
+
         if (data.code !== "Ok" || data.routes.length === 0) {
             throw new Error("No route found");
         }
 
-        return data.routes.slice(0, 3);
+        const routes = data.routes.slice(0, 3);
+
+        if (routes.length < 3) {
+            console.log("Fewer than 3 routes returned. A fallback route is needed.");
+
+            const midLat = (startCoords[0] + endCoords[0]) / 2;
+            const midLon = (startCoords[1] + endCoords[1]) / 2;
+
+            const latDiff = endCoords[0] - startCoords[0];
+            const lonDiff = endCoords[1] - startCoords[1];
+
+            const waypointLat = midLat - lonDiff * 0.2;
+            const waypointLon = midLon + latDiff * 0.2;
+
+            console.log("Waypoint:", waypointLat, waypointLon);
+
+            const waypointUrl = 
+                "https://router.project-osrm.org/route/v1/driving/" + 
+                startCoords[1] + "," + startCoords[0] + ";" +
+                waypointLon + "," + waypointLat + ";" +
+                endCoords[1] + "," + endCoords[0] +
+                "?overview=full&geometries=geojson&alternatives=1&steps=true";
+
+            console.log("Waypoint route URL:", waypointUrl);
+
+            const waypointResponse = await fetch(waypointUrl);
+            const waypointData = await waypointResponse.json();
+
+            console.log("Waypoint route response:", waypointData.code);
+            console.log("Waypoint route routes:", waypointData.routes?.length ?? 0);
+
+            if (waypointData.code === "Ok" && waypointData.routes.length > 0) {
+                const thirdRoute = waypointData.routes[0];
+
+                console.log("Third route distance:", thirdRoute.distance / 1609.34, "miles");
+                console.log("Third route duration:", thirdRoute.duration / 60, "minutes");
+
+                const firstRoute = routes[0];
+
+                console.log(
+                    "Route 1 points:", 
+                    firstRoute.geometry.coordinates.length,
+                ); 
+
+                console.log(
+                    "Route 3 points:", 
+                    thirdRoute.geometry.coordinates.length
+                ); 
+                
+                routes.push(thirdRoute);
+                console.log("Total routes ater fallback:", routes.length);
+            } 
+
+        return routes;
+    }
     }
 
      document.getElementById("planRoute").addEventListener("click", async function() {
@@ -174,8 +233,9 @@
 
                 const line = L.polyline(roadCoords, {
                     color: routeColors[index % routeColors.length],
-                    weight: 5,
-                    opacity: 0.8
+                    weight: index === 2 ? 3 : 5,
+                    opacity: index === 2 ? 0.6 : 0.9,
+                    dashArray: index === 2 ? "8, 8" : null
                 }).addTo(map);
 
                 routeLines.push(line);
