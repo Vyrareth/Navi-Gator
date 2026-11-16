@@ -1,10 +1,241 @@
-Additional info:
+Navi-Gator: setup and run instructions
+======================================
 
-To run saving the route, before doing so, you must update the environmental variables CLOUDFLARE_R2_ACCESS_KEY_ID and CLOUDFLARE_R2_SECRET_ACCESS_KEY respectively on the terminal fit for environmental variables
+This guide is for the Windows project folder containing
+"2ndtest_routing_app_updated - Copy.py". Run the commands below in PowerShell,
+from that project folder. Use Python 3.12 (64-bit) for both environments.
 
-Order of running the program:
-assure all files are in the same folder location on your device
-make sure the html is inside of a folder called "template"
-run 2ndtest_routing_app_updated - Copy.py, a server number of 0.0.0.0:0000 format should appear on the output screen, click on it to have a local connection
-click on 2 different destinations then click on "Plan Trip", a route should show from the 2 different points and segments w lats and longs 
-click on "Save Route" to utilize the CNN and output a new route based on rating and after it does its calculations, a new route should show
+1. What you need
+----------------
+
+Computer:
+- 64-bit Windows 10/11 or macOS. A compatible 64-bit Linux computer may also
+  work, but the commands in this guide are for Windows and macOS.
+- CPU is sufficient; a GPU is not required.
+- 8 GB RAM is a practical development recommendation, not a measured minimum.
+- Internet access is needed for OSRM routing, OpenStreetMap map tiles, the
+  Leaflet CDN, and (when classifying images) Cloudflare R2.
+
+Software and project files:
+- Python 3.12 (64-bit); use the Python launcher ("py") on Windows or
+  python3.12 in macOS Terminal.
+- The project files listed below. Keep the scripts, data files, and model in
+  the project folder as shown; the app derives their locations from its script.
+- A modern browser.
+
+Required files:
+- 2ndtest_routing_app_updated - Copy.py
+- Request - Copy.py
+- road_classifier.py
+- road_cnn.keras
+- requirements-road-classifier.txt
+- requirements-r2.txt
+- naviGator_camcountyUpdated_db.db
+- Route_storage.json (the app can create it if absent; its folder must be
+  writable)
+- templates\2ndindex_w_saved_route_coords - Copy.html
+
+The HTML folder is named "templates" (plural). The app creates
+test_navigation.db and its locations table when first accessed, but it does not
+automatically add locations. Add at least two valid locations before using
+"Plan Trip". The sector database is separate: it needs the Sector, Road, and
+Segments tables, with road names and R2 image object keys that match the routes.
+
+2. Create and install the Python environments
+----------------------------------------------
+
+Open PowerShell and change to the project folder. For example:
+
+    Set-Location "C:\Users\your-name\path\to\Routing and Requesting"
+
+Check that Python 3.12 is available:
+
+    py -3.12 --version
+
+Create one environment for the Flask app and its R2 client, and a second one
+for TensorFlow. The app launches the classifier in a separate process, so
+TensorFlow must be installed in the classifier environment.
+
+    py -3.12 -m venv .venv
+    .\.venv\Scripts\python.exe -m pip install --upgrade pip
+    .\.venv\Scripts\python.exe -m pip install Flask -r .\requirements-r2.txt
+
+    py -3.12 -m venv .venv-classifier
+    .\.venv-classifier\Scripts\python.exe -m pip install --upgrade pip
+    .\.venv-classifier\Scripts\python.exe -m pip install -r .\requirements-road-classifier.txt
+
+The classifier requirements include TensorFlow, NumPy, and Pillow. Allow time
+and disk space for TensorFlow to install. Do not use Python 3.14 for the
+classifier environment; Python 3.12 is the recommended common version.
+
+3. Configure Cloudflare R2
+--------------------------
+
+Route preview does not require R2. Saving a route uses R2 when matching images
+are found in the local sector database. To enable that image download and CNN
+classification:
+
+1. In the Cloudflare dashboard, open R2 and create an R2 API token / S3
+   credentials for this application.
+2. Grant only Object Read access, scoped to the required bucket. The current
+   bucket name in Request - Copy.py is:
+       camden-county-street-images
+   Do not grant write or broad account permissions. The app only calls the
+   S3-compatible GetObject operation.
+3. Copy the generated Access Key ID and Secret Access Key. These are S3 API
+   credentials, not a Cloudflare global API key. Keep the secret private and
+   do not put it in source files or commit it to version control.
+4. Find the Cloudflare account ID that owns the bucket. The R2 endpoint used by
+   the code is:
+       https://<ACCOUNT_ID>.r2.cloudflarestorage.com
+   The code has a default account ID, but setting the correct account ID below
+   is recommended, especially if using a different account.
+5. In the same PowerShell window that will start the app, set:
+
+    $env:CLOUDFLARE_ACCOUNT_ID = "<your-account-id>"
+    $env:CLOUDFLARE_R2_ACCESS_KEY_ID = "<your-r2-access-key-id>"
+    $env:CLOUDFLARE_R2_SECRET_ACCESS_KEY = "<your-r2-secret-access-key>"
+
+These settings apply only to that PowerShell window. Set them again in a new
+window. Do not paste real credentials into this text file.
+
+R2 bucket requirements:
+- The bucket must be in the account identified by CLOUDFLARE_ACCOUNT_ID.
+- The credential must have Object Read permission for that bucket.
+- Object keys and file names must match the keys in Segments.Photo_file in
+  naviGator_camcountyUpdated_db.db. The database code normalizes paths and
+  derives image/road keys from file names; the image files must be available
+  under those exact R2 keys.
+- No public bucket access, CORS rule, R2 write permission, or Cloudflare
+  global API key is needed for this server-side download flow.
+
+4. Add locations for route planning
+------------------------------------
+
+The app's local location database is test_navigation.db. It is created
+automatically, but begins without locations. For a quick local test, add two
+sample locations from PowerShell:
+
+    .\.venv\Scripts\python.exe -c "import sqlite3; c=sqlite3.connect('test_navigation.db'); c.execute('CREATE TABLE IF NOT EXISTS locations (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, latitude REAL NOT NULL, longitude REAL NOT NULL)'); c.executemany('INSERT OR IGNORE INTO locations(name,latitude,longitude) VALUES(?,?,?)',[('Start',39.95,-75.12),('End',39.98,-75.10)]); c.commit(); c.close()"
+
+Use your own valid place names and latitude/longitude coordinates as needed.
+Coordinates are stored as latitude and longitude; the routing service receives
+them in longitude,latitude order. For normal use, populate this database with
+the locations you want users to choose.
+
+5. Start and use the app
+------------------------
+
+In the PowerShell window where you set the R2 environment variables, start the
+Flask app:
+
+    .\.venv\Scripts\python.exe ".\2ndtest_routing_app_updated - Copy.py"
+
+The development server runs on 127.0.0.1 (localhost), typically at
+http://127.0.0.1:5000/. Open that address in a browser. The app does not print
+an address intended to be clicked, and it is not configured for public access.
+Keep the PowerShell window open while using it; press Ctrl+C there to stop it.
+
+In the browser:
+1. Choose a starting location and destination from the suggestions.
+2. Click "Plan Trip". The app requests driving routes from the public OSRM
+   service, displays the route on the map, and lists route segments.
+3. Click "Save Route". The app compares available route candidates. When
+   matching sector images exist, it downloads them from R2 and runs the CNN;
+   the selected route is then shown and the saved record is written locally.
+
+Saving requires working local database files and write permission for
+test_navigation.db and Route_storage.json. If no matching road sectors or R2
+images exist, the app may have no image ratings to compare. Cloudflare R2 is
+not the source of the routing data; OSRM provides the route geometry.
+
+6. Troubleshooting
+------------------
+
+- "At least two locations..." or empty selectors: populate test_navigation.db
+  with two or more locations.
+- Template not found: check that the folder is named templates (plural), and
+  that the HTML file is inside it.
+- R2 credentials/configuration error: check that all three environment
+  variables are set in the PowerShell window running the app.
+- R2 access denied: verify the token is an R2 S3 credential with Object Read
+  on the correct bucket, and verify the account ID and bucket name.
+- Missing images: confirm that Segments.Photo_file refers to object keys that
+  actually exist in the configured bucket. Missing objects do not receive CNN
+  ratings.
+- Classifier Python/model error: verify that .venv-classifier was created with
+  Python 3.12, requirements-road-classifier.txt installed successfully, and
+  road_cnn.keras and road_classifier.py are next to the app scripts.
+- Routing or map failures: check the internet connection. OSRM, OpenStreetMap,
+  and the Leaflet CDN are external services and may be unavailable or rate
+  limited.
+- Permission errors: make sure the current Windows user can write to the
+  project folder and the two local SQLite/JSON data files.
+
+7. Run on macOS
+---------------
+
+These commands are for macOS Terminal using zsh. They assume the required
+project files and templates folder are together in one project directory.
+Python 3.12 is recommended on Apple Silicon and Intel Macs. TensorFlow must
+have an installable wheel for your Mac's processor and Python version; Apple
+Silicon is the recommended Mac configuration. A GPU is not required.
+
+Install Python 3.12 if needed (for example, using the official Python installer
+or Homebrew), then open Terminal and change to the project folder. Replace the
+path with the actual location:
+
+    cd "/path/to/Routing and Requesting"
+    python3.12 --version
+
+Create separate environments for the web app and classifier, then install
+their dependencies:
+
+    python3.12 -m venv .venv
+    ./.venv/bin/python -m pip install --upgrade pip
+    ./.venv/bin/python -m pip install Flask -r requirements-r2.txt
+
+    python3.12 -m venv .venv-classifier
+    ./.venv-classifier/bin/python -m pip install --upgrade pip
+    ./.venv-classifier/bin/python -m pip install -r requirements-road-classifier.txt
+
+If TensorFlow installation reports that no compatible distribution is
+available, confirm that you installed 64-bit Python 3.12 for your Mac's CPU
+architecture. The classifier runs in a separate process and needs TensorFlow,
+NumPy, Pillow, road_classifier.py, and road_cnn.keras in the project folder.
+
+Configure R2 credentials in the same Terminal session that will run the app.
+Use the bucket-scoped, Object Read credentials described in section 3:
+
+    export CLOUDFLARE_ACCOUNT_ID="<your-account-id>"
+    export CLOUDFLARE_R2_ACCESS_KEY_ID="<your-r2-access-key-id>"
+    export CLOUDFLARE_R2_SECRET_ACCESS_KEY="<your-r2-secret-access-key>"
+
+The export settings last only for that Terminal session. Keep the secret out of
+source files and do not commit it. The app uses the R2 credentials server-side;
+browser CORS configuration is not needed.
+
+The app's location database is created empty. Add at least two locations before
+planning a route. To insert sample locations from the project directory:
+
+    ./.venv/bin/python -c "import sqlite3; c=sqlite3.connect('test_navigation.db'); c.execute('CREATE TABLE IF NOT EXISTS locations (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, latitude REAL NOT NULL, longitude REAL NOT NULL)'); c.executemany('INSERT OR IGNORE INTO locations(name,latitude,longitude) VALUES(?,?,?)',[('Start',39.95,-75.12),('End',39.98,-75.10)]); c.commit(); c.close()"
+
+Start the app from that same directory and Terminal session:
+
+    ./.venv/bin/python "2ndtest_routing_app_updated - Copy.py"
+
+Open http://127.0.0.1:5000/ in a browser. Choose two locations and click
+"Plan Trip"; click "Save Route" to save and, when matching road images exist,
+download and classify them from R2. Keep Terminal open while using the app and
+press Ctrl+C to stop the server. Ensure your macOS user can write to the
+project folder, test_navigation.db, and Route_storage.json.
+
+The server binds to 127.0.0.1 with Flask debug mode enabled, so use it for
+local development only; do not expose it directly to the public internet.
+OSRM, OpenStreetMap tiles, and the Leaflet CDN also require internet access.
+
+Security and deployment note:
+The app starts Flask's development server with debug enabled and binds to
+127.0.0.1. Use it for local development only. Do not expose this debug server
+to the public internet; a production deployment needs a production WSGI server,
+debug disabled, and securely managed secrets.
