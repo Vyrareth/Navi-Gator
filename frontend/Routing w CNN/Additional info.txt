@@ -33,7 +33,7 @@ Required files:
 - naviGator_camcountyUpdated_db.db
 - Route_storage.json (the app can create it if absent; its folder must be
   writable)
-- templates\2ndindex_w_saved_route_coords - Copy.html
+- templates\2ndindex_w_saved_route_coords - Copy.html *Note: templates folder must have '2ndindex_w_saved_route_coords - Copy.html' added to it.
 
 The HTML folder is named "templates" (plural). The app creates
 test_navigation.db and its locations table when first accessed, but it does not
