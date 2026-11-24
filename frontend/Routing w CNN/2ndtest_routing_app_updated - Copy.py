@@ -12,9 +12,14 @@ import json
 import math
 import sqlite3
 from pathlib import Path
+###Added by Don - Manages address-address navigation. 
+from geopy.exc import GeocoderServiceError, GeocoderTimedOut
+from geopy.geocoders import Nominatim
 
 app = Flask(__name__) #using flask to create a web application for routing and navigation
 app.config["DATABASE"] = Path(__file__).with_name("test_navigation.db")
+
+geocoder=Nominatim(user_agent="routing-app/1.0",timeout=15) ###Added by Don, helps with a-a nav.  
 
 request_module_path = Path(__file__).with_name("Request - Copy.py")
 request_module_spec = importlib.util.spec_from_file_location(
@@ -25,6 +30,29 @@ if request_module_spec is None or request_module_spec.loader is None:
     raise ImportError(f"Could not load route utilities from {request_module_path}.")
 Request = importlib.util.module_from_spec(request_module_spec)
 request_module_spec.loader.exec_module(Request)
+
+
+###Grabs geocoder address.
+def geocodeAddress(address: str) -> tuple[float,float]:
+    cleaned=address.strip()
+    if not cleaned:
+        raise ValueError("Address may not be empty")
+
+    try:
+        location=geocoder.geocode(cleaned)
+    except (GeocoderTimedOut, GeocoderServiceError) as error:
+        raise ValueError(f"Geocoding failed for '{cleaned}':{error}") from error
+
+    if location is None:
+        raise ValueError(f"Could not find coordinates for address: {cleaned}")
+
+    lat=float(location.latitude)
+    lon=float(location.longitude)
+
+    if not (-90<=lat<=90 and -180<=lon<=180):
+        raise ValueError(f"Geocoded coordinates out of range for : {cleaned}")
+
+    return lat, lon
 
 
 def fetch_route( #function to fetch the route from the OSRM routing service
@@ -154,6 +182,34 @@ def get_db_connection(): #function used to connect to the SQLite database
     )
     return connection #return the database connection
 
+def getOrCreateLocationID(connection:sqlite3.Connection,payload: dict[str,Any],id_key:str,address_key:str)-> int:
+    address=payload.get(address_key)
+    if address is not None:
+        if not isinstance(address,str) or not address.strip():
+            raise ValueError(f"{address_key} must be a nonempty string")
+        cleaned=address.strip()
+        lat,lon=geocodeAddress(cleaned)
+        connection.execute(
+            """
+            INSERT OR IGNORE INTO locations (name, latitude, longitude)
+            VALUES (?,?,?)
+            """,(cleaned,lat,lon))
+        row=connection.execute(
+            "SELECT id FROM locations WHERE name = ?",(cleaned)).fetchone()
+        if row is None:
+            raise ValueError(f"Couldn't resolve location record for '{cleaned}'.")
+        return int(row["id"])
+
+    loc_id=payload.get(id_key)
+    if type(loc_id) is not int:
+        raise ValueError(f"Provide a valid '{address_key}' string or '{id_key}' integer.")
+    row=connection.execute(
+        "SELECT id FROM locations WHERE id = ?",(loc_id)).fetchone()
+    if row is None:
+        raise LookupError("One or both locations were not found.")
+    return int(row["id"])
+        
+
 @app.route("/") 
 def home():
     connection = get_db_connection() #get a connection to the SQLite database
@@ -186,38 +242,73 @@ def enqueue_route_request(): #function to handle the enqueueing of a new route r
     payload = request.get_json()
     if not isinstance(payload, dict):
         return jsonify(error="Expected a JSON object."), 400 #return an error if the request body is not a JSON object
-
+    '''NOTE OLD CODE HERE
     start_id = payload.get("start_id") #extract the start location ID from the request payload
     end_id = payload.get("end_id") #extract the end location ID from the request payload
+
     if type(start_id) is not int or type(end_id) is not int: #check if start_id and end_id are integers
         return jsonify(error="start_id and end_id must be integers."), 400 #return an error if start_id or end_id is not an integer
     if start_id == end_id: #check if start_id and end_id are the same
         return jsonify(error="Choose two different locations."), 400 #return an error if start_id and end_id are the same
+    '''
 
+    ### New code here
+    start_address=payload.get("start_address")
+    end_address=payload.get("end_address")
+
+    if (isinstance(start_address,str) and isinstance(end_address,str) and start_address.strip().lower()==end_address.strip().lower()):
+        return jsonify(error="Choose two different locations."),400
+    ### end new code
+    
     connection = get_db_connection()
     try:
         locations = connection.execute( #execute a SQL query to fetch the start and end locations from the database
-            "SELECT id, latitude, longitude FROM locations WHERE id IN (?, ?)",
-            (start_id, end_id),
-        ).fetchall() #fetch the locations from the database
+            "SELECT id, latitude, longitude FROM locations").fetchall() #fetch the locations from the database
     finally:
         connection.close()
 
     locations_by_id = {location["id"]: location for location in locations} #create a dictionary of locations keyed by their ID
-    if start_id not in locations_by_id or end_id not in locations_by_id: #check if both start and end locations exist
-        return jsonify(error="One or both locations were not found."), 404 #return an error if one or both locations are not found
+    try:
+        if start_address is not None:
+            if not isinstance(start_address, str) or not start_address.strip():
+                return jsonify(error="start_address must be a non-empty string."), 400
+            start_lat, start_lon = geocodeAddress(start_address)
+        else:
+            start_id = payload.get("start_id")
+            if type(start_id) is not int:
+                return jsonify(error="Provide a valid start_address or integer start_id."), 400
+            if start_id not in locations_by_id:
+                return jsonify(error="One or both locations were not found."), 404
+            start_lat = float(locations_by_id[start_id]["latitude"])
+            start_lon = float(locations_by_id[start_id]["longitude"])
 
-    start = locations_by_id[start_id] #get the start location from the dictionary
-    end = locations_by_id[end_id] #get the end location from the dictionary
-    coordinates = ( #create a tuple of coordinates for the route request
-        start["longitude"],
-        start["latitude"],
-        end["longitude"],
-        end["latitude"],
+        if end_address is not None:
+            if not isinstance(end_address, str) or not end_address.strip():
+                return jsonify(error="end_address must be a non-empty string."), 400
+            end_lat, end_lon = geocodeAddress(end_address)
+        else:
+            end_id = payload.get("end_id")
+            if type(end_id) is not int:
+                return jsonify(error="Provide a valid end_address or integer end_id."), 400
+            if end_id not in locations_by_id:
+                return jsonify(error="One or both locations were not found."), 404
+            end_lat = float(locations_by_id[end_id]["latitude"])
+            end_lon = float(locations_by_id[end_id]["longitude"])
+    except ValueError as error:
+        return jsonify(error=str(error)), 400
+    
+    if (start_lat, start_lon) == (end_lat, end_lon):
+        return jsonify(error="Choose two different locations."), 400
+
+    coordinates = (  # create a tuple of coordinates for the route request
+        start_lon,
+        start_lat,
+        end_lon,
+        end_lat,
     )
-    queue_service: RouteRequestQueue = current_app.config["ROUTE_REQUEST_QUEUE"] #get the route request queue service
-    job_id = queue_service.enqueue(coordinates) #enqueue the route request with the coordinates
-    return jsonify(id=job_id, status="queued"), 202 #return the job ID and status as a JSON response
+    queue_service: RouteRequestQueue = current_app.config["ROUTE_REQUEST_QUEUE"]  # get the route request queue service
+    job_id = queue_service.enqueue(coordinates)  # enqueue the route request with the coordinates
+    return jsonify(id=job_id, status="queued"), 202  # return the job ID and status as a JSON response
 
 
 @app.route("/api/route-requests/<job_id>") #endpoint to get the status of a route request
@@ -238,16 +329,8 @@ def save_route(): #function to handle the saving of a route
     if not isinstance(payload, dict): #check if the payload is a dictionary
         return jsonify(error="Expected a JSON object."), 400 #return an error if the request body is not a JSON object
 
-    start_id = payload.get("start_id") #get the start location ID from the payload
-    end_id = payload.get("end_id") #get the end location ID from the payload
     route_data = payload.get("route")
     route_candidates = payload.get("route_candidates", [route_data])
-    if type(start_id) is not int or type(end_id) is not int: #check if start_id and end_id are integers
-        return jsonify(error="start_id and end_id must be integers."), 400 #return an error if start_id or end_id is not an integer
-    if start_id == end_id: #check if start_id and end_id are the same
-        return jsonify(error="Choose two different locations."), 400 #return an error if start_id and end_id are the same
-    if not isinstance(route_data, dict):
-        return jsonify(error="A planned route is required to save."), 400
     if (
         not isinstance(route_candidates, list)
         or not route_candidates
@@ -255,6 +338,7 @@ def save_route(): #function to handle the saving of a route
         or any(not isinstance(candidate, dict) for candidate in route_candidates)
     ):
         return jsonify(error="route_candidates must contain between 1 and 5 route objects."), 400
+
 
     for candidate in route_candidates:
         candidate_distance = candidate.get("distance")
@@ -372,6 +456,49 @@ def save_route(): #function to handle the saving of a route
                 )
                 """
             )
+            try:
+                start_id = getOrCreateLocationID(
+                    connection, payload, "start_id", "start_address"
+                )
+                end_id = getOrCreateLocationID(
+                    connection, payload, "end_id", "end_address"
+                )
+            except LookupError as error:
+                return jsonify(error=str(error)), 404
+            except ValueError as error:
+                return jsonify(error=str(error)), 400
+
+            if start_id == end_id:  # check if start_id and end_id are the same
+                return jsonify(error="Choose two different locations."), 400
+
+            cursor = connection.execute(  # execute the SQL command to insert a new saved route
+                """
+                INSERT INTO saved_routes (start_location_id, end_location_id)
+                VALUES (?, ?)
+                """,
+                (start_id, end_id),
+            )
+            route_id = cursor.lastrowid  # get the ID of the newly inserted saved route
+            connection.executemany(  # execute the SQL command to insert the saved route segments
+                """
+                INSERT INTO saved_route_segments (
+                    route_id, segment_order, road_name,
+                    start_latitude, start_longitude, end_latitude, end_longitude
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (route_id, order, *segment)  # create a tuple for each segment with the route ID, segment order, and segment details
+                    for order, segment in enumerate(validated_segments)  # enumerate the validated segments to get the order and segment details
+                ],
+            )
+    finally:
+        connection.close()
+
+
+
+
+    '''
+    """ OLD CODE
             locations = connection.execute(
                 "SELECT id FROM locations WHERE id IN (?, ?)",
                 (start_id, end_id),
@@ -401,6 +528,8 @@ def save_route(): #function to handle the saving of a route
             )
     finally:
         connection.close()
+    """
+    '''
 
     route_save_result = Request.save_route(
         route_data,
